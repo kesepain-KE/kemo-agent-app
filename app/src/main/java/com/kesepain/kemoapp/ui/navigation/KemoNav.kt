@@ -1,7 +1,12 @@
 package com.kesepain.kemoapp.ui.navigation
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.view.WindowManager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,19 +22,25 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -44,9 +55,9 @@ import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.ui.screens.chat.ChatScreen
 import com.kesepain.kemoapp.ui.screens.connect.ConnectScreen
 import com.kesepain.kemoapp.ui.screens.config.AgentConfigScreen
-import com.kesepain.kemoapp.ui.screens.config.UserConfigDraft
 import com.kesepain.kemoapp.ui.screens.files.FilesScreen
 import com.kesepain.kemoapp.ui.screens.modules.ModulesScreen
+import com.kesepain.kemoapp.ui.screens.settings.AppAboutScreen
 import com.kesepain.kemoapp.ui.screens.settings.AppSettingsScreen
 import com.kesepain.kemoapp.ui.screens.settings.ModelsScreen
 import com.kesepain.kemoapp.ui.screens.settings.NotificationsScreen
@@ -73,10 +84,21 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
     val snackbarHostState = remember { SnackbarHostState() }
     val haptic = LocalHapticFeedback.current
     val pendingKeys by viewModel.pendingKeys.collectAsState()
+    val appAbout by viewModel.appAbout.collectAsState()
+    val window = LocalView.current.context.findActivity()?.window
+    var editingAccountId by remember { mutableStateOf<String?>(null) }
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route.orEmpty()
     val mainRoute = tabs.any { it.route == route }
-    val providerType = UserConfigDraft.from(state.agentConfig).providerType
+    val backgroundActive = state.preferences.themeBackgroundUri.isNotBlank()
+    LaunchedEffect(route) { if (route != "connect") editingAccountId = null }
+    DisposableEffect(route, window) {
+        window?.setSoftInputMode(
+            if (route == "chat") WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+            else WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+        )
+        onDispose { }
+    }
     LaunchedEffect(Unit) { viewModel.loadDashboard() }
     LaunchedEffect(viewModel) {
         viewModel.messages.collectLatest { message ->
@@ -93,12 +115,15 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
         }
     }
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = if (backgroundActive) Color.Transparent else MaterialTheme.colorScheme.surface,
+        // Let the chat drawer render behind the status bar. ChatScreen applies the safe inset to
+        // its actual content, while the drawer sheet and scrim remain truly edge-to-edge.
+        contentWindowInsets = if (route == "chat") WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (mainRoute) NavigationBar(
                 modifier = Modifier.fillMaxWidth(),
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                containerColor = if (backgroundActive) MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f) else MaterialTheme.colorScheme.surfaceContainer,
             ) {
                 Spacer(Modifier.width(16.dp))
                 tabs.forEach { tab ->
@@ -119,6 +144,7 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                 ChatScreen(
                     state.chatEntries,
                     state.conversations,
+                    state.status,
                     state.streaming,
                     state.chatClosed,
                     viewModel::loadConversations,
@@ -127,16 +153,30 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     viewModel::deleteAllConversations,
                     viewModel::sendChat,
                     viewModel::clearConversation,
-                    viewModel::saveConversation,
+                    viewModel::retryLastResponse,
                     viewModel::compressConversation,
                     viewModel::saveAndNewConversation,
+                    viewModel::reportCopied,
                     state.pendingChatAttachments,
                     state.chatAttachmentUploading,
+                    state.guidanceSubmitting,
+                    state.chatStopping,
                     viewModel::addChatAttachment,
                     viewModel::removeChatAttachment,
+                    viewModel::stopChat,
+                    viewModel::loadChatMedia,
+                    { path -> viewModel.downloadFile("download", path) },
+                    viewModel::loadChatAttachment,
+                    state.filePreview,
+                    state.filePreview?.let { preview ->
+                        "download:${preview.scope}:${preview.path}" in pendingKeys
+                    } == true,
+                    viewModel::previewFile,
+                    viewModel::clearFilePreview,
+                    { path -> viewModel.downloadFile("upload", path) },
                 )
             }
-            composable("tasks") { TasksScreen(state.tasks, state.cron, pendingKeys, viewModel::loadTasks, viewModel::taskAction, viewModel::updateCron) }
+            composable("tasks") { TasksScreen(state.tasks, state.cron, pendingKeys, viewModel::loadTasks) }
             composable("status") { StatusScreen(state.status, "refresh:status" in pendingKeys, viewModel::loadStatus) }
             composable("modules") { ModulesScreen(state.expands, state.senses, pendingKeys, viewModel::loadModules, viewModel::setWhitelist) }
             composable("files") {
@@ -163,7 +203,11 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     state.preferences.tone,
                     state.preferences.themeMode,
                     state.avatarBytes,
+                    state.versions,
+                    state.status,
                     viewModel::switchAccount,
+                    onEdit = { accountId -> editingAccountId = accountId; navController.navigate("connect") },
+                    onDelete = viewModel::deleteAccount,
                     onAdd = { navController.navigate("connect") },
                     onSettings = { viewModel.loadAgentConfig(); navController.navigate("settings") },
                     onConfiguration = { viewModel.loadAgentConfig(); navController.navigate("agent-config") },
@@ -171,7 +215,8 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     onNotifications = { navController.navigate("notifications") },
                     onSecurity = { navController.navigate("security") },
                     onStatus = { viewModel.loadStatus(); navController.navigate("status") },
-                    onVersion = { viewModel.loadProfileData(); navController.navigate("versions") },
+                    onFrameworkVersion = { viewModel.loadProfileData(); navController.navigate("versions") },
+                    onAppVersion = { navController.navigate("app-about") },
                     onLogout = viewModel::logout,
                 )
             }
@@ -179,8 +224,8 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                 SettingsScreen(
                     state.preferences, viewModel::setTheme, viewModel::setTone, onLanguageChanged,
                     viewModel::setDynamicColor,
-                    providerType = providerType,
-                    onModels = { viewModel.loadModels(); navController.navigate("models") },
+                    viewModel::setThemeBackground,
+                    viewModel::resetTheme,
                 )
             }
             composable("app-settings") {
@@ -211,16 +256,30 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                 ) { viewModel.patchAgentConfig(it.toChanges()) }
             }
             composable("versions") { VersionScreen(state.versions) }
+            composable("app-about") {
+                AppAboutScreen(
+                    state = appAbout,
+                    onBack = { navController.popBackStack() },
+                    onLoad = viewModel::loadAppAbout,
+                    onCheckUpdate = viewModel::checkForAppUpdate,
+                    onDownloadUpdate = viewModel::downloadAppUpdate,
+                    onInstallUpdate = viewModel::installDownloadedUpdate,
+                )
+            }
             composable("connect") {
-                val current = state.preferences.accounts.firstOrNull { it.id == state.preferences.currentAccountId }
+                val current = state.preferences.accounts.firstOrNull { it.id == (editingAccountId ?: state.preferences.currentAccountId) }
                 ConnectScreen(
                     current = current,
                     busy = state.busy,
                     error = state.error,
-                    rememberedDeviceToken = state.rememberedDeviceToken,
-                    rememberedUserPassword = state.rememberedUserPassword,
+                    rememberedDeviceToken = if (editingAccountId == null || editingAccountId == state.preferences.currentAccountId) state.rememberedDeviceToken else "",
+                    rememberedUserPassword = if (editingAccountId == null || editingAccountId == state.preferences.currentAccountId) state.rememberedUserPassword else "",
                     initiallyRememberCredentials = state.rememberCredentials,
-                    onConnect = viewModel::connect,
+                    onConnect = { baseUrl, token, username, password, appPassword, rememberCredentials ->
+                        val editing = editingAccountId
+                        if (editing == null) viewModel.connect(baseUrl, token, username, password, appPassword, rememberCredentials)
+                        else viewModel.reconnectAccount(editing, baseUrl, token, username, password, appPassword, rememberCredentials)
+                    },
                 )
             }
             }
@@ -228,3 +287,8 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
     }
 }
 
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
