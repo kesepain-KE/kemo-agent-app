@@ -34,6 +34,8 @@ data class AppPreferences(
     val widgetPending: Int = 0,
     val widgetLatest: String = "",
     val downloadDirectoryUri: String = "",
+    val themeBackgroundUri: String = "",
+    val themeBackgroundMime: String = "",
 )
 
 class Prefs(private val context: Context) {
@@ -54,6 +56,8 @@ class Prefs(private val context: Context) {
             widgetPending = values[WIDGET_PENDING] ?: 0,
             widgetLatest = values[WIDGET_LATEST].orEmpty(),
             downloadDirectoryUri = values[DOWNLOAD_DIRECTORY_URI].orEmpty(),
+            themeBackgroundUri = values[THEME_BACKGROUND_URI].orEmpty(),
+            themeBackgroundMime = values[THEME_BACKGROUND_MIME].orEmpty(),
         )
     }
 
@@ -68,15 +72,50 @@ class Prefs(private val context: Context) {
         }
     }
 
+    suspend fun removeAccount(id: String) {
+        context.kemoDataStore.edit { values ->
+            val current = runCatching {
+                json.decodeFromString<List<AccountConfig>>(values[ACCOUNTS] ?: "[]")
+            }.getOrDefault(emptyList())
+            val remaining = current.filterNot { it.id == id }
+            values[ACCOUNTS] = json.encodeToString(remaining)
+            if (values[CURRENT_ACCOUNT] == id) {
+                values[CURRENT_ACCOUNT] = remaining.firstOrNull()?.id.orEmpty()
+            }
+        }
+    }
+
     suspend fun setCurrentAccount(id: String) = set(CURRENT_ACCOUNT, id)
     suspend fun setThemeMode(value: String) = set(THEME_MODE, value)
     suspend fun setTone(value: String) = set(TONE, value)
+    suspend fun setToneAndDisableDynamicColor(value: String) {
+        context.kemoDataStore.edit { values ->
+            values[TONE] = value
+            values[DYNAMIC_COLOR] = false
+        }
+    }
     suspend fun setLanguage(value: String) = set(LANGUAGE, value)
     suspend fun setNotifications(value: Boolean) = set(NOTIFICATIONS, value)
     suspend fun setDynamicColor(value: Boolean) = set(DYNAMIC_COLOR, value)
     suspend fun setBiometricEnabled(value: Boolean) = set(BIOMETRIC_ENABLED, value)
     suspend fun setAutoLockMinutes(value: Int) = set(AUTO_LOCK, value)
     suspend fun setDownloadDirectoryUri(value: String) = set(DOWNLOAD_DIRECTORY_URI, value)
+    suspend fun setThemeBackground(uri: String, mimeType: String) {
+        context.kemoDataStore.edit { values ->
+            values[THEME_BACKGROUND_URI] = uri
+            values[THEME_BACKGROUND_MIME] = mimeType
+        }
+    }
+
+    suspend fun resetTheme() {
+        context.kemoDataStore.edit { values ->
+            values[THEME_MODE] = "system"
+            values[TONE] = "Purple"
+            values[DYNAMIC_COLOR] = false
+            values.remove(THEME_BACKGROUND_URI)
+            values.remove(THEME_BACKGROUND_MIME)
+        }
+    }
 
     suspend fun setWidgetSummary(pending: Int, latest: String) {
         context.kemoDataStore.edit { values ->
@@ -111,5 +150,7 @@ class Prefs(private val context: Context) {
         private val WIDGET_PENDING = intPreferencesKey("widget_pending")
         private val WIDGET_LATEST = stringPreferencesKey("widget_latest")
         private val DOWNLOAD_DIRECTORY_URI = stringPreferencesKey("download_directory_uri")
+        private val THEME_BACKGROUND_URI = stringPreferencesKey("theme_background_uri")
+        private val THEME_BACKGROUND_MIME = stringPreferencesKey("theme_background_mime")
     }
 }

@@ -1,5 +1,8 @@
 package com.kesepain.kemoapp.ui.screens.settings
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,20 +17,23 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.AssistChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.data.local.AppPreferences
@@ -41,15 +47,24 @@ fun SettingsScreen(
     onTone: (String) -> Unit,
     onLanguage: (String) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
-    providerType: String,
-    onModels: () -> Unit,
+    onBackgroundChanged: (String, String) -> Unit,
+    onResetTheme: () -> Unit,
 ) {
-    val uriHandler = LocalUriHandler.current
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text(stringResource(R.string.settings), style = MaterialTheme.typography.headlineSmall) }
-        if (providerType.equals("kemo", ignoreCase = true)) {
-            item { SettingCard(stringResource(R.string.models), onModels) }
+    val context = LocalContext.current
+    var languageExpanded by remember { mutableStateOf(false) }
+    val backgroundPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val mimeType = context.contentResolver.getType(uri).orEmpty()
+            if (mimeType.startsWith("image/") || mimeType.startsWith("video/")) {
+                onBackgroundChanged(uri.toString(), mimeType)
+            }
         }
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text(stringResource(R.string.theme_settings), style = MaterialTheme.typography.headlineSmall) }
         item {
             Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -77,33 +92,65 @@ fun SettingsScreen(
         }
         item {
             Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stringResource(R.string.language), style = MaterialTheme.typography.titleMedium)
-                    AssistChip(
-                        onClick = { onLanguage(if (preferences.language == "zh") "en" else "zh") },
-                        label = { Text(stringResource(if (preferences.language == "zh") R.string.language_switch_zh else R.string.language_switch_en)) },
-                    )
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(stringResource(R.string.restore_theme), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.restore_theme_summary), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    OutlinedButton(onClick = onResetTheme) { Text(stringResource(R.string.restore)) }
                 }
             }
         }
-        item { SettingCard(stringResource(R.string.about)) { uriHandler.openUri("https://github.com/kesepain-KE/kemo-agent-app") } }
-        item { Text(stringResource(R.string.version), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-    }
-}
-
-@Composable
-private fun SettingCard(title: String, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        item {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(stringResource(R.string.background_theme), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.background_theme_summary), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (preferences.themeBackgroundUri.isNotBlank()) {
+                        Text(
+                            stringResource(
+                                if (preferences.themeBackgroundMime.startsWith("video/")) R.string.background_video_active else R.string.background_image_active,
+                            ),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { backgroundPicker.launch(arrayOf("image/*", "video/*")) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(if (preferences.themeBackgroundUri.isBlank()) R.string.upload_background else R.string.replace_background))
+                    }
+                }
+            }
+        }
+        item {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(stringResource(R.string.language), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.language_current), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Box {
+                        OutlinedButton(onClick = { languageExpanded = true }) {
+                            Text(stringResource(if (preferences.language == "en") R.string.language_en else R.string.language_zh))
+                        }
+                        DropdownMenu(expanded = languageExpanded, onDismissRequest = { languageExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.language_zh)) },
+                                onClick = { languageExpanded = false; onLanguage("zh") },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.language_en)) },
+                                onClick = { languageExpanded = false; onLanguage("en") },
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
