@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.0-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1-blue" alt="version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
 
@@ -182,7 +182,9 @@ kemo-agent-app 并不试图替代网页端或命令行。
 
 ## 当前状态
 
-当前版本：`1.0`
+当前版本：`1.1`
+
+`1.1` 在 1.0 的基础上带来一轮体验升级：聊天页支持数学公式渲染与媒体卡片，可以随时停止生成、重新回复上一轮，并能在回复期间继续发送引导；后台轮询会在回复完成时推送通知；设置页可挑选图片或视频作为全局背景；任务与模块卡片点击即可查看完整详情；文件预览扩展到音频、视频与 PDF；配置页的模型选择换成可搜索的选择器；App 内新增关于页，可直接检查 GitHub Releases 并下载安装新版本。
 
 `1.0` 是 kemo-agent-app 的首个正式版本，覆盖 Kemo 生态移动端的基础能力：连接与两级认证、流式对话、任务计划与定时任务、文件管理、拓展感知开关、运行状态、智能体配置、安全解锁与桌面小组件。
 

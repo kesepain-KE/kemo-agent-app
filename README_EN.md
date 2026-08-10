@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.0-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1-blue" alt="version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
 
@@ -182,7 +182,9 @@ No matter which entry point you use, it connects to the same agent, the same his
 
 ## Current status
 
-Current version: `1.0`
+Current version: `1.1`
+
+`1.1` brings a round of experience upgrades on top of 1.0: the chat screen now renders math formulas and media cards, lets you stop generation, regenerate the previous reply, and send guidance while the agent is responding; a background poller pushes a notification when the reply completes; the settings screen lets you pick an image or video as the global background; task and module cards open a full detail sheet on tap; file previews extend to audio, video, and PDF; the model picker in the configuration screen becomes searchable; and a new About page checks GitHub Releases and installs new versions right inside the app.
 
 `1.0` is the first official release of kemo-agent-app, covering the mobile foundation of the Kemo ecosystem: connection with two-level authentication, streaming chat, task plans and scheduled tasks, file management, extension and perception toggles, runtime status, agent configuration, secure unlock, and a home-screen widget.
 
