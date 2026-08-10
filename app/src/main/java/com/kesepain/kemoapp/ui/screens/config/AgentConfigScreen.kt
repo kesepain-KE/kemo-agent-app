@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +35,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.kesepain.kemoapp.R
+import com.kesepain.kemoapp.ui.components.BusySwitch
 import com.kesepain.kemoapp.ui.components.records
 import com.kesepain.kemoapp.ui.components.stringItems
 import kotlinx.serialization.json.JsonElement
@@ -46,6 +46,7 @@ fun AgentConfigScreen(
     models: JsonElement?,
     onRefresh: () -> Unit,
     onModelsRefresh: () -> Unit,
+    busy: Boolean = false,
     onSave: (UserConfigDraft) -> Unit,
 ) {
     var draft by remember { mutableStateOf(UserConfigDraft.from(value)) }
@@ -105,11 +106,11 @@ fun AgentConfigScreen(
                     singleLine = true,
                 )
                 ConfigTextField(stringResource(R.string.reasoning_effort), draft.reasoningEffort) { draft = draft.copy(reasoningEffort = it) }
-                ConfigToggleRow(stringResource(R.string.streaming_output), draft.stream) { draft = draft.copy(stream = it) }
-                ConfigToggleRow(stringResource(R.string.support_image_input), draft.imageInput) { draft = draft.copy(imageInput = it) }
-                ConfigToggleRow(stringResource(R.string.support_audio_input), draft.audioInput) { draft = draft.copy(audioInput = it) }
-                ConfigToggleRow(stringResource(R.string.support_video_input), draft.videoInput) { draft = draft.copy(videoInput = it) }
-                ConfigToggleRow(stringResource(R.string.support_file_input), draft.fileInput) { draft = draft.copy(fileInput = it) }
+                ConfigToggleRow(stringResource(R.string.streaming_output), draft.stream, busy = busy) { draft = draft.copy(stream = it) }
+                ConfigToggleRow(stringResource(R.string.support_image_input), draft.imageInput, busy = busy) { draft = draft.copy(imageInput = it) }
+                ConfigToggleRow(stringResource(R.string.support_audio_input), draft.audioInput, busy = busy) { draft = draft.copy(audioInput = it) }
+                ConfigToggleRow(stringResource(R.string.support_video_input), draft.videoInput, busy = busy) { draft = draft.copy(videoInput = it) }
+                ConfigToggleRow(stringResource(R.string.support_file_input), draft.fileInput, busy = busy) { draft = draft.copy(fileInput = it) }
             }
         }
         item {
@@ -136,8 +137,8 @@ fun AgentConfigScreen(
         }
         item {
             ConfigCard(stringResource(R.string.knowledge_permissions)) {
-                ConfigToggleRow(stringResource(R.string.use_shared_knowledge), draft.useSharedKnowledge) { draft = draft.copy(useSharedKnowledge = it) }
-                ConfigToggleRow(stringResource(R.string.use_global_knowledge), draft.useGlobalKnowledge) { draft = draft.copy(useGlobalKnowledge = it) }
+                ConfigToggleRow(stringResource(R.string.use_shared_knowledge), draft.useSharedKnowledge, busy = busy) { draft = draft.copy(useSharedKnowledge = it) }
+                ConfigToggleRow(stringResource(R.string.use_global_knowledge), draft.useGlobalKnowledge, busy = busy) { draft = draft.copy(useGlobalKnowledge = it) }
                 ConfigTextField(stringResource(R.string.skills_shared_whitelist), draft.skillsSharedWhitelist) { draft = draft.copy(skillsSharedWhitelist = it) }
                 ConfigTextField(stringResource(R.string.expand_shared_whitelist), draft.expandSharedWhitelist) { draft = draft.copy(expandSharedWhitelist = it) }
                 ConfigTextField(stringResource(R.string.expand_global_whitelist), draft.expandGlobalWhitelist) { draft = draft.copy(expandGlobalWhitelist = it) }
@@ -147,15 +148,15 @@ fun AgentConfigScreen(
         }
         item {
             ConfigCard(stringResource(R.string.injection_configuration)) {
-                ConfigToggleRow(stringResource(R.string.expand_prompt_injection), draft.expandPromptInjection) { draft = draft.copy(expandPromptInjection = it) }
-                ConfigToggleRow(stringResource(R.string.expand_realtime_injection), draft.expandRealtimeInjection) { draft = draft.copy(expandRealtimeInjection = it) }
-                ConfigToggleRow(stringResource(R.string.perception_prompt_injection), draft.perceptionPromptInjection) { draft = draft.copy(perceptionPromptInjection = it) }
-                ConfigToggleRow(stringResource(R.string.perception_realtime_injection), draft.perceptionRealtimeInjection) { draft = draft.copy(perceptionRealtimeInjection = it) }
+                ConfigToggleRow(stringResource(R.string.expand_prompt_injection), draft.expandPromptInjection, busy = busy) { draft = draft.copy(expandPromptInjection = it) }
+                ConfigToggleRow(stringResource(R.string.expand_realtime_injection), draft.expandRealtimeInjection, busy = busy) { draft = draft.copy(expandRealtimeInjection = it) }
+                ConfigToggleRow(stringResource(R.string.perception_prompt_injection), draft.perceptionPromptInjection, busy = busy) { draft = draft.copy(perceptionPromptInjection = it) }
+                ConfigToggleRow(stringResource(R.string.perception_realtime_injection), draft.perceptionRealtimeInjection, busy = busy) { draft = draft.copy(perceptionRealtimeInjection = it) }
             }
         }
         item {
             ConfigCard(stringResource(R.string.task_configuration)) {
-                ConfigToggleRow(stringResource(R.string.task_auto_accept), draft.taskPlanAutoAccept) { draft = draft.copy(taskPlanAutoAccept = it) }
+                ConfigToggleRow(stringResource(R.string.task_auto_accept), draft.taskPlanAutoAccept, busy = busy) { draft = draft.copy(taskPlanAutoAccept = it) }
             }
         }
     }
@@ -235,10 +236,10 @@ private fun ConfigTextField(label: String, value: String, onValueChange: (String
 }
 
 @Composable
-private fun ConfigToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun ConfigToggleRow(label: String, checked: Boolean, busy: Boolean = false, onCheckedChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        Switch(checked, onCheckedChange)
+        BusySwitch(checked, onCheckedChange, busy = busy)
     }
 }
 
@@ -254,3 +255,4 @@ private fun multimodalLabel(key: String): String = stringResource(when (key) {
     "video_generation" -> R.string.multimodal_video_generation
     else -> R.string.multimodal_models
 })
+

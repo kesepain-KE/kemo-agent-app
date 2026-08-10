@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -16,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
+import com.kesepain.kemoapp.ui.components.BusySwitch
 
 @Composable
 fun NotificationsScreen(enabled: Boolean, onEnabledChanged: (Boolean) -> Unit) {
@@ -30,7 +30,7 @@ fun NotificationsScreen(enabled: Boolean, onEnabledChanged: (Boolean) -> Unit) {
                     Text(stringResource(R.string.push_notifications), style = MaterialTheme.typography.titleMedium)
                     Text(stringResource(R.string.push_notifications_summary), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Switch(checked = enabled, onCheckedChange = onEnabledChanged)
+                BusySwitch(checked = enabled, onCheckedChange = onEnabledChanged)
             }
         }
     }

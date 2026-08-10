@@ -23,6 +23,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -68,6 +69,7 @@ private val tabs = listOf(
 fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = false, onLanguageChanged: (String) -> Unit) {
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
+    val pendingKeys by viewModel.pendingKeys.collectAsState()
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route.orEmpty()
     val mainRoute = tabs.any { it.route == route }
@@ -126,9 +128,9 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     viewModel::removeChatAttachment,
                 )
             }
-            composable("tasks") { TasksScreen(state.tasks, state.cron, viewModel::loadTasks) }
+            composable("tasks") { TasksScreen(state.tasks, state.cron, pendingKeys, viewModel::loadTasks) }
             composable("status") { StatusScreen(state.status, viewModel::loadStatus) }
-            composable("modules") { ModulesScreen(state.expands, state.senses, viewModel::loadModules, viewModel::setWhitelist) }
+            composable("modules") { ModulesScreen(state.expands, state.senses, pendingKeys, viewModel::loadModules, viewModel::setWhitelist) }
             composable("files") {
                 FilesScreen(
                     state.uploadFiles,
@@ -189,6 +191,7 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     models = state.models,
                     onRefresh = viewModel::loadAgentConfig,
                     onModelsRefresh = viewModel::loadModels,
+                    busy = "config" in pendingKeys,
                 ) { viewModel.patchAgentConfig(it.toChanges()) }
             }
             composable("versions") { VersionScreen(state.versions) }

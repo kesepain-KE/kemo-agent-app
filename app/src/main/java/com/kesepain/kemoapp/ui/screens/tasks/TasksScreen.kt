@@ -20,7 +20,7 @@ import com.kesepain.kemoapp.ui.components.records
 import kotlinx.serialization.json.JsonElement
 
 @Composable
-fun TasksScreen(tasks: JsonElement?, cron: JsonElement?, onRefresh: () -> Unit) {
+fun TasksScreen(tasks: JsonElement?, cron: JsonElement?, pendingKeys: Set<String>, onRefresh: () -> Unit) {
     val plans = tasks.records("plans", "task_plans", "items").filter { it.text("plan_id", "id").isNotBlank() }
     val cronItems = cron.records("crons", "cron", "scheduled", "items").filter { it.text("task_id", "id").isNotBlank() }
     LazyColumn(
@@ -51,6 +51,7 @@ fun TasksScreen(tasks: JsonElement?, cron: JsonElement?, onRefresh: () -> Unit) 
                 schedule = item.text("schedule", "cron", "interval", "time"),
                 nextRun = item.text("next_run", "next_run_at", "next"),
                 enabled = item.boolean("enabled", "active") ?: true,
+                busy = "cron:${item.text("task_id", "id")}" in pendingKeys,
             )
         }
     }

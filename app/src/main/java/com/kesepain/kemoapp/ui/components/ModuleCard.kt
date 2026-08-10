@@ -14,7 +14,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,13 +25,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun ModuleCard(name: String, status: String, updatedAt: String, details: List<Pair<String, String>>, enabled: Boolean?, onEnabledChange: ((Boolean) -> Unit)? = null) {
+fun ModuleCard(name: String, status: String, updatedAt: String, details: List<Pair<String, String>>, enabled: Boolean?, busy: Boolean = false, onEnabledChange: ((Boolean) -> Unit)? = null) {
     var expanded by rememberSaveable(name) { mutableStateOf(false) }
     Card(shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                if (enabled != null && onEnabledChange != null) Switch(enabled, onEnabledChange) else StatusChip(status)
+                if (enabled != null && onEnabledChange != null) BusySwitch(enabled, onEnabledChange, busy = busy) else StatusChip(status)
             }
             if (status.isNotBlank() && enabled != null) StatusChip(status)
             if (updatedAt.isNotBlank()) Text(updatedAt, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

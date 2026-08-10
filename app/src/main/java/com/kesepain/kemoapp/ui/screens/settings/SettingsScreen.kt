@@ -19,7 +19,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -29,6 +28,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.data.local.AppPreferences
+import com.kesepain.kemoapp.ui.components.BusySwitch
 import com.kesepain.kemoapp.ui.theme.KemoTone
 
 @Composable
@@ -67,7 +67,7 @@ fun SettingsScreen(
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(stringResource(R.string.dynamic_color), modifier = Modifier.weight(1f))
-                        Switch(preferences.dynamicColor, onDynamicColor)
+                        BusySwitch(preferences.dynamicColor, onDynamicColor)
                     }
                 }
             }

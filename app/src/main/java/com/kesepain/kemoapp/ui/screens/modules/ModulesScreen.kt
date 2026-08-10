@@ -19,7 +19,7 @@ import com.kesepain.kemoapp.ui.components.records
 import kotlinx.serialization.json.JsonElement
 
 @Composable
-fun ModulesScreen(expands: JsonElement?, senses: JsonElement?, onRefresh: () -> Unit, onToggle: (String, String, String, Boolean) -> Unit) {
+fun ModulesScreen(expands: JsonElement?, senses: JsonElement?, pendingKeys: Set<String>, onRefresh: () -> Unit, onToggle: (String, String, String, Boolean) -> Unit) {
     val expandItems = expands.records("expands")
     val senseItems = senses.records("sources")
     LaunchedEffect(Unit) { onRefresh() }
@@ -33,6 +33,8 @@ fun ModulesScreen(expands: JsonElement?, senses: JsonElement?, onRefresh: () -> 
         if (expandItems.isEmpty()) item { IllustratedEmptyState(stringResource(R.string.no_modules)) }
         items(expandItems, key = { "expand-${it.text("scope")}-${it.text("name", "id")}" }) { module ->
             val name = module.text("display_name", "name", "id")
+            val scope = module.text("scope").ifBlank { "global" }
+            val rawName = module.text("name", "id")
             ModuleDataCard(
                 key = "${module.text("scope")}-$name",
                 name = name,
@@ -40,12 +42,14 @@ fun ModulesScreen(expands: JsonElement?, senses: JsonElement?, onRefresh: () -> 
                 updatedAt = module.text("updated", "updated_at", "recent_update", "last_update"),
                 data = module.element("data"),
                 enabled = module.boolean("enabled", "open_input", "active_for_main_agent", "active") ?: false,
-                onEnabledChange = { enabled -> onToggle("expand", module.text("scope").ifBlank { "global" }, module.text("name", "id"), enabled) },
+                busy = "whitelist:expand:$scope:$rawName" in pendingKeys,
+                onEnabledChange = { enabled -> onToggle("expand", scope, rawName, enabled) },
             )
         }
         item { SectionHeader(stringResource(R.string.senses), senseItems.size) }
         if (senseItems.isEmpty()) item { IllustratedEmptyState(stringResource(R.string.no_senses)) }
         items(senseItems, key = { "sense-${it.text("id", "name")}" }) { sense ->
+            val rawName = sense.text("name", "id")
             ModuleDataCard(
                 key = "sense-${sense.text("id", "name")}",
                 name = sense.text("display_name", "name", "id"),
@@ -53,7 +57,8 @@ fun ModulesScreen(expands: JsonElement?, senses: JsonElement?, onRefresh: () -> 
                 updatedAt = sense.text("updated_at", "recent_update"),
                 data = sense.element("injected_markdown"),
                 enabled = sense.boolean("active_for_main_agent", "enabled", "whitelisted") ?: false,
-                onEnabledChange = { enabled -> onToggle("sense", "global", sense.text("name", "id"), enabled) },
+                busy = "whitelist:sense:global:$rawName" in pendingKeys,
+                onEnabledChange = { enabled -> onToggle("sense", "global", rawName, enabled) },
             )
         }
     }

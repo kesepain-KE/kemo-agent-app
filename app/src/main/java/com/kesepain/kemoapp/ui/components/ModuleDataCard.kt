@@ -24,7 +24,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +45,7 @@ fun ModuleDataCard(
     status: String,
     data: JsonElement?,
     enabled: Boolean? = null,
+    busy: Boolean = false,
     onEnabledChange: ((Boolean) -> Unit)? = null,
 ) {
     var expanded by rememberSaveable(key) { mutableStateOf(false) }
@@ -67,7 +67,7 @@ fun ModuleDataCard(
                     ),
                 )
                 Text(name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 10.dp).weight(1f))
-                if (enabled != null && onEnabledChange != null) Switch(checked = enabled, onCheckedChange = onEnabledChange)
+                if (enabled != null && onEnabledChange != null) BusySwitch(checked = enabled, onCheckedChange = onEnabledChange, busy = busy)
                 Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                     if (hasData) Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
                 }

@@ -12,7 +12,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.security.BiometricHelper
+import com.kesepain.kemoapp.ui.components.BusySwitch
 
 @Composable
 fun SecurityScreen(
@@ -40,6 +40,7 @@ fun SecurityScreen(
     var newPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var resultMessage by remember { mutableStateOf("") }
+    var biometricBusy by remember { mutableStateOf(false) }
     val authTitle = stringResource(R.string.security_auth_title)
     val authSubtitle = stringResource(R.string.security_auth_subtitle)
 
@@ -52,13 +53,18 @@ fun SecurityScreen(
                         Text(stringResource(R.string.biometric_unlock), style = MaterialTheme.typography.titleMedium)
                         Text(stringResource(R.string.biometric_setting_summary), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(
+                    BusySwitch(
                         checked = biometricEnabled,
                         onCheckedChange = { target ->
                             activity?.let { host ->
-                                BiometricHelper.authenticate(host, authTitle, authSubtitle) { success -> if (success) onBiometricEnabled(target) }
+                                biometricBusy = true
+                                BiometricHelper.authenticate(host, authTitle, authSubtitle) { success ->
+                                    biometricBusy = false
+                                    if (success) onBiometricEnabled(target)
+                                }
                             }
                         },
+                        busy = biometricBusy,
                         enabled = activity != null,
                     )
                 }
