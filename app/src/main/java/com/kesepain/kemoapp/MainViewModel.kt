@@ -358,18 +358,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun loadTasks() = viewModelScope.launch { loadTasksInternal() }
+    fun loadTasks() = launchBusy("refresh:tasks") { loadTasksInternal() }
     fun loadConversations() = viewModelScope.launch { loadConversationsInternal() }
-    fun loadStatus() = viewModelScope.launch { loadStatusInternal() }
-    fun loadModules() = viewModelScope.launch { loadModulesInternal() }
-    fun loadFiles(scope: String, path: String, page: Int = 1) = viewModelScope.launch { loadFileDirectory(scope, path, page) }
+    fun loadStatus() = launchBusy("refresh:status") { loadStatusInternal() }
+    fun loadModules() = launchBusy("refresh:modules") { loadModulesInternal() }
+    fun loadFiles(scope: String, path: String, page: Int = 1) = launchBusy("refresh:files:${scope.lowercase()}") { loadFileDirectory(scope, path, page) }
     fun uploadFile(uri: Uri, directory: String) = launchBusy("upload") {
         repo.uploadFile(uri, directory)
         loadFileDirectory("upload", directory, 1)
     }
     fun loadKnowledge() = viewModelScope.launch { loadValue({ repo.knowledge() }) { value -> copy(knowledge = value) } }
-    fun loadModels() = viewModelScope.launch { loadValue({ repo.models() }) { value -> copy(models = value) } }
-    fun loadAgentConfig() = viewModelScope.launch { loadValue({ repo.config() }) { value -> copy(agentConfig = value) } }
+    fun loadModels() = launchBusy("refresh:models") { loadValue({ repo.models() }) { value -> copy(models = value) } }
+    fun loadAgentConfig() = launchBusy("refresh:config") { loadValue({ repo.config() }) { value -> copy(agentConfig = value) } }
     fun loadProfileData() = viewModelScope.launch {
         runCatching { repo.avatar() to repo.version() }
             .onSuccess { values -> _state.update { it.copy(avatarBytes = values.first, versions = values.second, error = "") } }

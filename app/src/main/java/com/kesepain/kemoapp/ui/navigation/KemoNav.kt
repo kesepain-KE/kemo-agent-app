@@ -128,14 +128,14 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     viewModel::removeChatAttachment,
                 )
             }
-            composable("tasks") { TasksScreen(state.tasks, state.cron, pendingKeys, viewModel::loadTasks) }
-            composable("status") { StatusScreen(state.status, viewModel::loadStatus) }
+            composable("tasks") { TasksScreen(state.tasks, state.cron, pendingKeys, viewModel::loadTasks, viewModel::taskAction) }
+            composable("status") { StatusScreen(state.status, "refresh:status" in pendingKeys, viewModel::loadStatus) }
             composable("modules") { ModulesScreen(state.expands, state.senses, pendingKeys, viewModel::loadModules, viewModel::setWhitelist) }
             composable("files") {
                 FilesScreen(
                     state.uploadFiles,
                     state.generatedFiles,
-                    state.busy,
+                    pendingKeys,
                     state.error,
                     viewModel::loadFiles,
                     viewModel::uploadFile,
@@ -184,7 +184,7 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
             composable("security") {
                 SecurityScreen(state.preferences.biometricEnabled, viewModel::setBiometricEnabled, viewModel::changeAppPassword)
             }
-            composable("models") { ModelsScreen(state.models, viewModel::loadModels, viewModel::selectModel) }
+            composable("models") { ModelsScreen(state.models, pendingKeys, viewModel::loadModels, viewModel::selectModel) }
             composable("agent-config") {
                 AgentConfigScreen(
                     value = state.agentConfig,
@@ -192,6 +192,7 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     onRefresh = viewModel::loadAgentConfig,
                     onModelsRefresh = viewModel::loadModels,
                     busy = "config" in pendingKeys,
+                    modelsRefreshing = "refresh:models" in pendingKeys,
                 ) { viewModel.patchAgentConfig(it.toChanges()) }
             }
             composable("versions") { VersionScreen(state.versions) }

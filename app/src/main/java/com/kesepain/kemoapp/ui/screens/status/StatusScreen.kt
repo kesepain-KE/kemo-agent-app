@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,18 +23,19 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.ui.components.JsonCard
+import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 import com.kesepain.kemoapp.ui.components.MetricCard
 import com.kesepain.kemoapp.ui.components.SectionHeader
 import com.kesepain.kemoapp.ui.components.metricValues
 import kotlinx.serialization.json.JsonElement
 
 @Composable
-fun StatusScreen(value: JsonElement?, onRefresh: () -> Unit) {
+fun StatusScreen(value: JsonElement?, refreshing: Boolean, onRefresh: () -> Unit) {
     val metrics = value.metricValues(32)
     val visibleMetrics = statusMetricsForDisplay(metrics)
     val online = metrics.any { (key, metric) -> key.contains("health", true) && metric.lowercase() in setOf("ok", "online", "healthy", "true") }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { SectionHeader(stringResource(R.string.status_title)) { OutlinedButton(onClick = onRefresh) { Text(stringResource(R.string.refresh)) } } }
+        item { SectionHeader(stringResource(R.string.status_title)) { LoadingOutlinedButton(onClick = onRefresh, loading = refreshing) { Text(stringResource(R.string.refresh)) } } }
         item {
             Card(shape = MaterialTheme.shapes.extraLarge, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .62f))) {
                 Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

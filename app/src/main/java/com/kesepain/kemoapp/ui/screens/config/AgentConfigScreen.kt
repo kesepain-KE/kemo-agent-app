@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -36,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.ui.components.BusySwitch
+import com.kesepain.kemoapp.ui.components.LoadingButton
+import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 import com.kesepain.kemoapp.ui.components.records
 import com.kesepain.kemoapp.ui.components.stringItems
 import kotlinx.serialization.json.JsonElement
@@ -47,6 +48,7 @@ fun AgentConfigScreen(
     onRefresh: () -> Unit,
     onModelsRefresh: () -> Unit,
     busy: Boolean = false,
+    modelsRefreshing: Boolean = false,
     onSave: (UserConfigDraft) -> Unit,
 ) {
     var draft by remember { mutableStateOf(UserConfigDraft.from(value)) }
@@ -75,7 +77,7 @@ fun AgentConfigScreen(
                     Text(stringResource(R.string.agent_configuration), style = MaterialTheme.typography.headlineSmall)
                     Text(stringResource(R.string.agent_configuration_summary), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Button(onClick = { onSave(draft) }) { Text(stringResource(R.string.save)) }
+                LoadingButton(onClick = { onSave(draft) }, loading = busy) { Text(stringResource(R.string.save)) }
             }
         }
         item {
@@ -91,6 +93,7 @@ fun AgentConfigScreen(
                         models = modelNames,
                         discoveryEnabled = savedProviderType.equals("kemo", ignoreCase = true),
                         onRefresh = onModelsRefresh,
+                        refreshing = modelsRefreshing,
                     ) { draft = draft.copy(model = it) }
                 } else {
                     ConfigTextField(stringResource(R.string.model), draft.model) { draft = draft.copy(model = it) }
@@ -168,6 +171,7 @@ private fun KemoModelSelector(
     models: List<String>,
     discoveryEnabled: Boolean,
     onRefresh: () -> Unit,
+    refreshing: Boolean,
     onSelected: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -212,7 +216,7 @@ private fun KemoModelSelector(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
-        OutlinedButton(onClick = onRefresh, enabled = discoveryEnabled) { Text(stringResource(R.string.refresh)) }
+        LoadingOutlinedButton(onClick = onRefresh, enabled = discoveryEnabled, loading = refreshing) { Text(stringResource(R.string.refresh)) }
     }
 }
 

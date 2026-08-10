@@ -25,7 +25,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -42,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.FilePreviewUi
 import com.kesepain.kemoapp.ui.components.IllustratedEmptyState
+import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 import com.kesepain.kemoapp.ui.components.SectionHeader
 import com.kesepain.kemoapp.ui.components.records
 import kotlinx.serialization.json.JsonElement
@@ -59,7 +59,7 @@ import java.util.Locale
 fun FilesScreen(
     uploadValue: JsonElement?,
     generatedValue: JsonElement?,
-    uploading: Boolean,
+    pendingKeys: Set<String>,
     error: String,
     onBrowse: (String, String, Int) -> Unit,
     onUpload: (Uri, String) -> Unit,
@@ -78,6 +78,8 @@ fun FilesScreen(
     val currentPath = listing.listingText("path")
     val currentPage = listing.paginationInt("page", 1)
     val totalPages = listing.paginationInt("total_pages", 1)
+    val uploadBusy = "upload" in pendingKeys
+    val refreshBusy = "refresh:files:$scope" in pendingKeys
     val uploadPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) onUpload(uri, currentPath)
     }
@@ -100,13 +102,13 @@ fun FilesScreen(
                 SectionHeader(stringResource(if (selected == 0) R.string.upload_files else R.string.generated_files)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (selected == 0) {
-                            OutlinedButton(onClick = { uploadPicker.launch(arrayOf("*/*")) }, enabled = !uploading) {
+                            LoadingOutlinedButton(onClick = { uploadPicker.launch(arrayOf("*/*")) }, loading = uploadBusy) {
                                 Icon(Icons.Default.UploadFile, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(stringResource(if (uploading) R.string.uploading else R.string.upload_file))
+                                Text(stringResource(if (uploadBusy) R.string.uploading else R.string.upload_file))
                             }
                         }
-                        OutlinedButton(onClick = { onBrowse(scope, currentPath, currentPage) }, enabled = !uploading) {
+                        LoadingOutlinedButton(onClick = { onBrowse(scope, currentPath, currentPage) }, loading = refreshBusy) {
                             Text(stringResource(R.string.refresh))
                         }
                     }
@@ -171,9 +173,9 @@ fun FilesScreen(
                         if (isDirectory) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.open_folder))
                         } else if (selected == 0) {
-                            OutlinedButton(onClick = { onDelete("upload", path) }) { Text(stringResource(R.string.delete)) }
+                            LoadingOutlinedButton(onClick = { onDelete("upload", path) }, loading = "file:upload:$path" in pendingKeys) { Text(stringResource(R.string.delete)) }
                         } else {
-                            OutlinedButton(onClick = { onDownload("download", path) }) { Text(stringResource(R.string.download)) }
+                            LoadingOutlinedButton(onClick = { onDownload("download", path) }, loading = "download:download:$path" in pendingKeys) { Text(stringResource(R.string.download)) }
                         }
                     }
                 }
@@ -185,11 +187,11 @@ fun FilesScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        OutlinedButton(onClick = { onBrowse(scope, currentPath, currentPage - 1) }, enabled = currentPage > 1) {
+                        LoadingOutlinedButton(onClick = { onBrowse(scope, currentPath, currentPage - 1) }, enabled = currentPage > 1, loading = refreshBusy) {
                             Text(stringResource(R.string.previous_page))
                         }
                         Text(stringResource(R.string.page_counter, currentPage, totalPages), style = MaterialTheme.typography.bodySmall)
-                        OutlinedButton(onClick = { onBrowse(scope, currentPath, currentPage + 1) }, enabled = currentPage < totalPages) {
+                        LoadingOutlinedButton(onClick = { onBrowse(scope, currentPath, currentPage + 1) }, enabled = currentPage < totalPages, loading = refreshBusy) {
                             Text(stringResource(R.string.next_page))
                         }
                     }
@@ -201,7 +203,8 @@ fun FilesScreen(
         FilePreviewDialog(
             preview = value,
             onDismiss = onClosePreview,
-            onDownload = { onDownload(value.scope, value.path); onClosePreview() },
+            downloading = "download:${value.scope}:${value.path}" in pendingKeys,
+            onDownload = { onDownload(value.scope, value.path) },
         )
     }
 }

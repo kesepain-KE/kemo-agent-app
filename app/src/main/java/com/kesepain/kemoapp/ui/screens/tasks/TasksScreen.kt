@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -13,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.ui.components.CronTaskCard
 import com.kesepain.kemoapp.ui.components.IllustratedEmptyState
+import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 import com.kesepain.kemoapp.ui.components.PlanCard
 import com.kesepain.kemoapp.ui.components.PlanStepUi
 import com.kesepain.kemoapp.ui.components.SectionHeader
@@ -20,7 +20,7 @@ import com.kesepain.kemoapp.ui.components.records
 import kotlinx.serialization.json.JsonElement
 
 @Composable
-fun TasksScreen(tasks: JsonElement?, cron: JsonElement?, pendingKeys: Set<String>, onRefresh: () -> Unit) {
+fun TasksScreen(tasks: JsonElement?, cron: JsonElement?, pendingKeys: Set<String>, onRefresh: () -> Unit, onTaskAction: (String, String) -> Unit) {
     val plans = tasks.records("plans", "task_plans", "items").filter { it.text("plan_id", "id").isNotBlank() }
     val cronItems = cron.records("crons", "cron", "scheduled", "items").filter { it.text("task_id", "id").isNotBlank() }
     LazyColumn(
@@ -28,7 +28,7 @@ fun TasksScreen(tasks: JsonElement?, cron: JsonElement?, pendingKeys: Set<String
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { SectionHeader(stringResource(R.string.tasks_title)) { OutlinedButton(onClick = onRefresh) { Text(stringResource(R.string.refresh)) } } }
+        item { SectionHeader(stringResource(R.string.tasks_title)) { LoadingOutlinedButton(onClick = onRefresh, loading = "refresh:tasks" in pendingKeys) { Text(stringResource(R.string.refresh)) } } }
         if (plans.isEmpty()) item { IllustratedEmptyState(stringResource(R.string.no_tasks)) }
         items(plans, key = { it.text("plan_id", "id") }) { plan ->
             val steps = plan.children("steps", "items").map { step ->
@@ -39,7 +39,7 @@ fun TasksScreen(tasks: JsonElement?, cron: JsonElement?, pendingKeys: Set<String
             }
             val rawProgress = plan.number("progress", "percent", "completion")
             val progress = rawProgress?.let { if (it > 1.0) (it / 100.0).toFloat() else it.toFloat() }
-            PlanCard(plan.text("plan_id", "id"), plan.text("title", "name"), plan.text("status", "state"), progress, steps)
+            PlanCard(plan.text("plan_id", "id"), plan.text("title", "name"), plan.text("status", "state"), progress, steps, pendingKeys, onTaskAction)
         }
 
         item { SectionHeader(stringResource(R.string.cron_title)) }

@@ -21,7 +21,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,10 +37,16 @@ import com.kesepain.kemoapp.R
 data class PlanStepUi(val title: String, val done: Boolean)
 
 @Composable
-fun PlanCard(id: String, title: String, status: String, progress: Float?, steps: List<PlanStepUi>) {
+fun PlanCard(id: String, title: String, status: String, progress: Float?, steps: List<PlanStepUi>, pendingKeys: Set<String>, onAction: (String, String) -> Unit) {
     var expanded by rememberSaveable(id) { mutableStateOf(false) }
     val done = steps.count(PlanStepUi::done)
     val normalizedProgress = progress ?: if (steps.isEmpty()) 0f else done.toFloat() / steps.size
+    val actions = when (status.lowercase()) {
+        "pending", "awaiting_approval", "approval", "waiting" -> listOf("approve", "abort")
+        "running", "in_progress", "active" -> listOf("pause", "abort")
+        "paused", "suspended" -> listOf("resume", "abort")
+        else -> emptyList()
+    }
     Card(
         modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
         shape = MaterialTheme.shapes.large,
@@ -53,6 +58,23 @@ fun PlanCard(id: String, title: String, status: String, progress: Float?, steps:
                 StatusChip(status)
             }
             LinearProgressIndicator(progress = { normalizedProgress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(5.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest)
+            if (actions.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    actions.forEach { action ->
+                        LoadingOutlinedButton(
+                            onClick = { onAction(id, action) },
+                            loading = "task:$id:$action" in pendingKeys,
+                        ) {
+                            Text(stringResource(when (action) {
+                                "approve" -> R.string.approve
+                                "pause" -> R.string.pause
+                                "resume" -> R.string.resume
+                                else -> R.string.abort
+                            }))
+                        }
+                    }
+                }
+            }
             AnimatedVisibility(expanded && steps.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.steps_progress, done, steps.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

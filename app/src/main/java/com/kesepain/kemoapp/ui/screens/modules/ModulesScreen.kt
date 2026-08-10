@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -13,6 +12,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.ui.components.IllustratedEmptyState
+import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 import com.kesepain.kemoapp.ui.components.ModuleDataCard
 import com.kesepain.kemoapp.ui.components.SectionHeader
 import com.kesepain.kemoapp.ui.components.records
@@ -28,7 +28,7 @@ fun ModulesScreen(expands: JsonElement?, senses: JsonElement?, pendingKeys: Set<
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { SectionHeader(stringResource(R.string.modules_title)) { OutlinedButton(onClick = onRefresh) { Text(stringResource(R.string.refresh)) } } }
+        item { SectionHeader(stringResource(R.string.modules_title)) { LoadingOutlinedButton(onClick = onRefresh, loading = "refresh:modules" in pendingKeys) { Text(stringResource(R.string.refresh)) } } }
         item { SectionHeader(stringResource(R.string.expands), expandItems.size) }
         if (expandItems.isEmpty()) item { IllustratedEmptyState(stringResource(R.string.no_modules)) }
         items(expandItems, key = { "expand-${it.text("scope")}-${it.text("name", "id")}" }) { module ->

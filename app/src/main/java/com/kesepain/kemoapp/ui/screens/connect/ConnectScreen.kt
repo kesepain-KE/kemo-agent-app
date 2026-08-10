@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -28,6 +27,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.data.local.AccountConfig
+import com.kesepain.kemoapp.ui.components.LoadingButton
 
 @Composable
 fun ConnectScreen(
@@ -72,9 +72,10 @@ fun ConnectScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Button(
+        LoadingButton(
             onClick = { onConnect(baseUrl, token, username, password, appPassword, rememberCredentials) },
-            enabled = !busy && baseUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
+            enabled = baseUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
+            loading = busy,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(18.dp),
         ) { Text(stringResource(if (busy) R.string.connecting else R.string.connect)) }

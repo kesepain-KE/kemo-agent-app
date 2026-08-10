@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +27,7 @@ import androidx.fragment.app.FragmentActivity
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.security.BiometricHelper
 import com.kesepain.kemoapp.ui.components.BusySwitch
+import com.kesepain.kemoapp.ui.components.LoadingButton
 
 @Composable
 fun SecurityScreen(
@@ -41,6 +41,7 @@ fun SecurityScreen(
     var confirmPassword by remember { mutableStateOf("") }
     var resultMessage by remember { mutableStateOf("") }
     var biometricBusy by remember { mutableStateOf(false) }
+    var passwordBusy by remember { mutableStateOf(false) }
     val authTitle = stringResource(R.string.security_auth_title)
     val authSubtitle = stringResource(R.string.security_auth_subtitle)
 
@@ -77,15 +78,20 @@ fun SecurityScreen(
                     OutlinedTextField(oldPassword, { oldPassword = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.old_app_password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
                     OutlinedTextField(newPassword, { newPassword = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.new_app_password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
                     OutlinedTextField(confirmPassword, { confirmPassword = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.confirm_app_password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-                    Button(
+                    LoadingButton(
                         onClick = {
                             if (newPassword != confirmPassword || newPassword.length < 4) {
                                 resultMessage = "invalid"
-                            } else onChangePassword(oldPassword, newPassword) { success ->
-                                resultMessage = if (success) "success" else "failed"
-                                if (success) { oldPassword = ""; newPassword = ""; confirmPassword = "" }
+                            } else {
+                                passwordBusy = true
+                                onChangePassword(oldPassword, newPassword) { success ->
+                                    passwordBusy = false
+                                    resultMessage = if (success) "success" else "failed"
+                                    if (success) { oldPassword = ""; newPassword = ""; confirmPassword = "" }
+                                }
                             }
                         },
+                        loading = passwordBusy,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text(stringResource(R.string.update_password)) }
                     if (resultMessage.isNotBlank()) {

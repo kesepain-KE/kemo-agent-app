@@ -17,7 +17,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -40,12 +39,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.FilePreviewUi
 import com.kesepain.kemoapp.R
+import com.kesepain.kemoapp.ui.components.LoadingButton
 import com.kesepain.kemoapp.ui.components.SafeMarkdown
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FilePreviewDialog(preview: FilePreviewUi, onDismiss: () -> Unit, onDownload: () -> Unit) {
+fun FilePreviewDialog(preview: FilePreviewUi, downloading: Boolean, onDismiss: () -> Unit, onDownload: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = null) {
         Column(Modifier.fillMaxSize()) {
             Row(
@@ -53,7 +53,7 @@ fun FilePreviewDialog(preview: FilePreviewUi, onDismiss: () -> Unit, onDownload:
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(preview.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 2)
-                Button(onClick = onDownload) { Text(stringResource(R.string.download)) }
+                LoadingButton(onClick = onDownload, loading = downloading) { Text(stringResource(R.string.download)) }
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, stringResource(R.string.close)) }
             }
             when {
@@ -109,9 +109,9 @@ private fun PdfPreview(preview: FilePreviewUi) {
     val bitmap = remember(file, pageIndex) { renderPdfPage(file, pageIndex) }
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Button(onClick = { pageIndex-- }, enabled = pageIndex > 0) { Text(stringResource(R.string.previous_page)) }
+            androidx.compose.material3.Button(onClick = { pageIndex-- }, enabled = pageIndex > 0) { Text(stringResource(R.string.previous_page)) }
             Text(stringResource(R.string.page_counter, pageIndex + 1, pageCount.coerceAtLeast(1)), modifier = Modifier.padding(top = 12.dp))
-            Button(onClick = { pageIndex++ }, enabled = pageIndex + 1 < pageCount) { Text(stringResource(R.string.next_page)) }
+            androidx.compose.material3.Button(onClick = { pageIndex++ }, enabled = pageIndex + 1 < pageCount) { Text(stringResource(R.string.next_page)) }
         }
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
