@@ -13,6 +13,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
@@ -26,7 +27,7 @@ fun BusySwitch(
     modifier: Modifier = Modifier,
 ) {
     val haptic = LocalHapticFeedback.current
-    val pendingDescription = stringResource(R.string.loading)
+    val pendingDescription = stringResource(R.string.feedback_switch_pending)
     Box(
         modifier = modifier
             .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
@@ -45,7 +46,7 @@ fun BusySwitch(
         )
         if (busy) {
             CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(18.dp).clearAndSetSemantics { },
                 color = MaterialTheme.colorScheme.primary,
                 strokeWidth = 2.dp,
             )

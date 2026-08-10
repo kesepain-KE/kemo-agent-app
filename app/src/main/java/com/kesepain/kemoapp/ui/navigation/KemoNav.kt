@@ -28,6 +28,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -69,6 +71,7 @@ private val tabs = listOf(
 fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = false, onLanguageChanged: (String) -> Unit) {
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
+    val haptic = LocalHapticFeedback.current
     val pendingKeys by viewModel.pendingKeys.collectAsState()
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route.orEmpty()
@@ -77,6 +80,11 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
     LaunchedEffect(Unit) { viewModel.loadDashboard() }
     LaunchedEffect(viewModel) {
         viewModel.messages.collectLatest { message ->
+            when (message.type) {
+                UiMessageType.Success -> haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                UiMessageType.Error -> haptic.performHapticFeedback(HapticFeedbackType.Reject)
+                UiMessageType.Info -> Unit
+            }
             snackbarHostState.currentSnackbarData?.dismiss()
             snackbarHostState.showSnackbar(
                 message = message.text,

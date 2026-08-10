@@ -3,6 +3,7 @@ package com.kesepain.kemoapp.ui.components
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.material3.Button
@@ -24,7 +25,7 @@ fun LoadingButton(
     shape: Shape = ButtonDefaults.shape,
     content: @Composable RowScope.() -> Unit,
 ) {
-    Button(onClick = onClick, modifier = modifier, enabled = enabled && !loading, shape = shape) {
+    Button(onClick = onClick, modifier = modifier.sizeIn(minHeight = 48.dp), enabled = enabled && !loading, shape = shape) {
         LoadingButtonContent(loading, content)
     }
 }
@@ -38,7 +39,7 @@ fun LoadingOutlinedButton(
     shape: Shape = ButtonDefaults.shape,
     content: @Composable RowScope.() -> Unit,
 ) {
-    OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled && !loading, shape = shape) {
+    OutlinedButton(onClick = onClick, modifier = modifier.sizeIn(minHeight = 48.dp), enabled = enabled && !loading, shape = shape) {
         LoadingButtonContent(loading, content)
     }
 }
@@ -52,7 +53,7 @@ fun LoadingFilledTonalButton(
     shape: Shape = ButtonDefaults.shape,
     content: @Composable RowScope.() -> Unit,
 ) {
-    FilledTonalButton(onClick = onClick, modifier = modifier, enabled = enabled && !loading, shape = shape) {
+    FilledTonalButton(onClick = onClick, modifier = modifier.sizeIn(minHeight = 48.dp), enabled = enabled && !loading, shape = shape) {
         LoadingButtonContent(loading, content)
     }
 }
