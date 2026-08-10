@@ -1,0 +1,417 @@
+package com.kesepain.kemoapp.data.repo
+
+import android.content.Context
+import android.content.ContentValues
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.OpenableColumns
+import android.provider.MediaStore
+import androidx.documentfile.provider.DocumentFile
+import com.kesepain.kemoapp.data.local.AccountConfig
+import com.kesepain.kemoapp.data.local.Prefs
+import com.kesepain.kemoapp.data.local.SecureStore
+import com.kesepain.kemoapp.data.remote.ApiBundle
+import com.kesepain.kemoapp.data.remote.ApiClient
+import com.kesepain.kemoapp.data.remote.ApiSecrets
+import com.kesepain.kemoapp.data.remote.AuthResponseDto
+import com.kesepain.kemoapp.data.remote.ChatRequestDto
+import com.kesepain.kemoapp.data.stream.ChatStreamParser
+import com.kesepain.kemoapp.data.stream.StreamEvent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
+import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import okio.source
+import java.util.UUID
+
+data class FilePreviewPayload(val name: String, val mimeType: String, val bytes: ByteArray)
+
+data class StoredCredentialState(
+    val deviceToken: String = "",
+    val userPassword: String = "",
+    val sessionToken: String = "",
+    val rememberCredentials: Boolean = false,
+    val sessionExpiresAt: Long = 0L,
+)
+
+class KemoRepository(private val context: Context) {
+    private val prefs = Prefs(context)
+    private val secure = SecureStore(context)
+    private var ephemeralCredentials: Pair<String, StoredCredentialState>? = null
+
+    /** 业务请求返回 401（会话过期/无效）时回调，由 ViewModel 处理登出 */
+    var onSessionExpired: (() -> Unit)? = null
+
+    suspend fun login(
+        baseUrl: String,
+        deviceToken: String,
+        username: String,
+        password: String,
+        appPassword: String,
+        rememberCredentials: Boolean,
+    ): AccountConfig = withContext(Dispatchers.IO) {
+        val account = AccountConfig(accountId(baseUrl, username), baseUrl.trimEnd('/'), username)
+        val bundle = ApiClient.create(account, ApiSecrets(deviceToken, ""))
+        bundle.client.newCall(
+            Request.Builder().url(bundle.baseUrl + "v1/auth/device").post("{}".toRequestBody(ApiClient.jsonMediaType)).build()
+        ).execute().use { if (!it.isSuccessful) error("device authentication failed (${it.code})") }
+        val loginJson = buildJsonObject { put("username", username); put("password", password) }
+        val auth = bundle.client.newCall(
+            Request.Builder().url(bundle.baseUrl + "v1/auth/user")
+                .post(ApiClient.json.encodeToString(loginJson).toRequestBody(ApiClient.jsonMediaType)).build()
+        ).execute().use {
+            val text = it.body?.string().orEmpty()
+            if (!it.isSuccessful) error("user authentication failed (${it.code})")
+            ApiClient.json.decodeFromString<AuthResponseDto>(text)
+        }
+        val now = System.currentTimeMillis() / 1000
+        val sessionExpiresAt = auth.expiresAt.takeIf { it > now } ?: (now + DEFAULT_SESSION_AGE_SECONDS)
+        val credentialsExpireAt = if (rememberCredentials) now + MAX_CREDENTIAL_AGE_SECONDS else sessionExpiresAt
+        if (rememberCredentials) {
+            synchronized(this@KemoRepository) { ephemeralCredentials = null }
+            secure.update(
+                account.id,
+                values = mapOf(
+                    SecureStore.DEVICE_TOKEN to deviceToken,
+                    SecureStore.USER_PASSWORD to password,
+                    SecureStore.SESSION_TOKEN to auth.sessionToken,
+                    SecureStore.SESSION_EXPIRES_AT to sessionExpiresAt.toString(),
+                    SecureStore.REMEMBER_CREDENTIALS to true.toString(),
+                    SecureStore.CREDENTIALS_EXPIRE_AT to credentialsExpireAt.toString(),
+                ),
+            )
+        } else {
+            synchronized(this@KemoRepository) {
+                ephemeralCredentials = account.id to StoredCredentialState(
+                    deviceToken = deviceToken,
+                    sessionToken = auth.sessionToken,
+                    rememberCredentials = false,
+                    sessionExpiresAt = sessionExpiresAt,
+                )
+            }
+            clearAuthentication(account.id)
+        }
+        if (appPassword.isNotBlank()) secure.put(account.id, SecureStore.APP_PASSWORD_HASH, sha256(appPassword))
+        prefs.saveAccount(account)
+        account
+    }
+
+    suspend fun bundle(): Pair<AccountConfig, ApiBundle> {
+        val snapshot = prefs.snapshot()
+        val account = snapshot.accounts.firstOrNull { it.id == snapshot.currentAccountId } ?: error("no configured account")
+        val credentials = credentialState(account.id)
+        val device = credentials.deviceToken
+        val session = credentials.sessionToken
+        if (device.isBlank() || session.isBlank()) error("account requires login")
+        return account to ApiClient.create(account, ApiSecrets(device, session))
+    }
+
+    suspend fun credentialState(accountId: String): StoredCredentialState {
+        val now = System.currentTimeMillis() / 1000
+        synchronized(this) { ephemeralCredentials }
+            ?.takeIf { it.first == accountId }
+            ?.second
+            ?.let { ephemeral ->
+                if (ephemeral.sessionExpiresAt > now) return ephemeral
+                synchronized(this) {
+                    if (ephemeralCredentials?.first == accountId) ephemeralCredentials = null
+                }
+            }
+
+        val remember = secure.get(accountId, SecureStore.REMEMBER_CREDENTIALS).toBooleanStrictOrNull() == true
+        if (!remember) {
+            val legacyValues = listOf(
+                SecureStore.DEVICE_TOKEN,
+                SecureStore.USER_PASSWORD,
+                SecureStore.SESSION_TOKEN,
+                SecureStore.SESSION_EXPIRES_AT,
+                SecureStore.CREDENTIALS_EXPIRE_AT,
+            ).any { secure.get(accountId, it).isNotBlank() }
+            if (legacyValues) clearAuthentication(accountId)
+            return StoredCredentialState()
+        }
+        val credentialsExpireAt = secure.get(accountId, SecureStore.CREDENTIALS_EXPIRE_AT).toLongOrNull() ?: 0L
+        if (credentialsExpireAt > 0L && credentialsExpireAt <= now) {
+            clearAuthentication(accountId)
+            return StoredCredentialState()
+        }
+
+        var session = secure.get(accountId, SecureStore.SESSION_TOKEN)
+        val sessionExpiresAt = secure.get(accountId, SecureStore.SESSION_EXPIRES_AT).toLongOrNull() ?: 0L
+        if (sessionExpiresAt > 0L && sessionExpiresAt <= now) {
+            val expiredNames = mutableSetOf(SecureStore.SESSION_TOKEN, SecureStore.SESSION_EXPIRES_AT)
+            session = ""
+            if (!remember) {
+                expiredNames += SecureStore.DEVICE_TOKEN
+                expiredNames += SecureStore.CREDENTIALS_EXPIRE_AT
+            }
+            secure.clear(accountId, expiredNames)
+        }
+
+        return StoredCredentialState(
+            deviceToken = secure.get(accountId, SecureStore.DEVICE_TOKEN),
+            userPassword = secure.get(accountId, SecureStore.USER_PASSWORD),
+            sessionToken = session,
+            rememberCredentials = true,
+            sessionExpiresAt = sessionExpiresAt,
+        )
+    }
+
+    suspend fun secrets(accountId: String): ApiSecrets {
+        val credentials = credentialState(accountId)
+        return ApiSecrets(credentials.deviceToken, credentials.sessionToken)
+    }
+
+    suspend fun appPasswordConfigured(accountId: String): Boolean = secure.get(accountId, SecureStore.APP_PASSWORD_HASH).isNotBlank()
+    suspend fun verifyAppPassword(accountId: String, value: String): Boolean = secure.get(accountId, SecureStore.APP_PASSWORD_HASH) == sha256(value)
+    suspend fun clearSession(accountId: String) {
+        synchronized(this) {
+            if (ephemeralCredentials?.first == accountId) ephemeralCredentials = null
+        }
+        val names = mutableSetOf(SecureStore.SESSION_TOKEN, SecureStore.SESSION_EXPIRES_AT)
+        if (secure.get(accountId, SecureStore.REMEMBER_CREDENTIALS).toBooleanStrictOrNull() != true) {
+            names += SecureStore.DEVICE_TOKEN
+            names += SecureStore.CREDENTIALS_EXPIRE_AT
+        }
+        secure.clear(accountId, names)
+    }
+
+    private suspend fun clearAuthentication(accountId: String) {
+        listOf(
+            SecureStore.DEVICE_TOKEN,
+            SecureStore.USER_PASSWORD,
+            SecureStore.SESSION_TOKEN,
+            SecureStore.SESSION_EXPIRES_AT,
+            SecureStore.REMEMBER_CREDENTIALS,
+            SecureStore.CREDENTIALS_EXPIRE_AT,
+        ).let { secure.clear(accountId, it) }
+    }
+
+    suspend fun health(): JsonElement = call { it.health() }
+    suspend fun conversations(): JsonElement = call { it.conversations() }
+    suspend fun deleteAllConversations(): JsonElement = call { it.deleteAllConversations() }
+    suspend fun conversationMessages(id: String): JsonElement = call { it.conversationMessages(id) }
+    suspend fun deleteConversation(id: String): JsonElement = call { it.deleteConversation(id) }
+    suspend fun closeConversation(id: String): JsonElement = call { it.closeConversation(id) }
+    suspend fun compressConversation(id: String): JsonElement = call { it.compressConversation(id) }
+    suspend fun taskPlans(): JsonElement = call { it.taskPlans() }
+    suspend fun cron(): JsonElement = call { it.cron() }
+    suspend fun status(): JsonElement = call { it.status() }
+    suspend fun expands(): JsonElement = call { it.expands() }
+    suspend fun expandsData(): JsonElement = call { it.expandsData() }
+    suspend fun senses(): JsonElement = call { it.senses() }
+    suspend fun files(scope: String, path: String = "", page: Int = 1): JsonElement = call { it.files(scope, path, page) }
+    suspend fun uploadFile(uri: Uri, directory: String): JsonElement = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        var displayName = uri.lastPathSegment.orEmpty().substringAfterLast('/').substringAfterLast('\\')
+        var length = -1L
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (nameIndex >= 0) displayName = cursor.getString(nameIndex).orEmpty()
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) length = cursor.getLong(sizeIndex)
+            }
+        }
+        val safeName = displayName.substringAfterLast('/').substringAfterLast('\\').trim().ifBlank { "upload.bin" }.take(240)
+        require(length < 0 || length <= MAX_UPLOAD_BYTES) { "文件超过最大限制 50 MB" }
+        val mediaType = resolver.getType(uri)?.toMediaTypeOrNull()
+        val body = object : RequestBody() {
+            override fun contentType() = mediaType
+            override fun contentLength(): Long = length
+            override fun writeTo(sink: BufferedSink) {
+                val input = resolver.openInputStream(uri) ?: error("无法读取所选文件")
+                input.use { sink.writeAll(it.source()) }
+            }
+        }
+        val part = MultipartBody.Part.createFormData("file", safeName, body)
+        val (_, bundle) = bundle()
+        val response = bundle.rest.uploadFile(directory.trim('/'), part)
+        val text = response.body()?.string().orEmpty()
+        if (!response.isSuccessful) {
+            if (response.code() == 401) onSessionExpired?.invoke()
+            error("upload failed (${response.code()})")
+        }
+        if (text.isBlank()) JsonObject(emptyMap()) else ApiClient.json.parseToJsonElement(text)
+    }
+    suspend fun knowledge(): JsonElement = call { it.knowledge() }
+    suspend fun searchKnowledge(query: String): JsonElement = call { it.knowledgeSearch(query) }
+    suspend fun models(): JsonElement = call { it.models() }
+    suspend fun config(): JsonElement = call { it.config() }
+    suspend fun version(): JsonElement = call { it.version() }
+
+    suspend fun avatar(): ByteArray? = withContext(Dispatchers.IO) {
+        val (_, bundle) = bundle()
+        val response = bundle.rest.avatar()
+        if (response.code() == 204) return@withContext null
+        if (!response.isSuccessful) {
+            if (response.code() == 401) onSessionExpired?.invoke()
+            error("avatar request failed (${response.code()})")
+        }
+        response.body()?.bytes()
+    }
+
+    suspend fun taskAction(id: String, action: String): JsonElement = call { it.taskAction(id, action) }
+    suspend fun createCron(rawJson: String): JsonElement = call { it.createCron(rawJson.toRequestBody(ApiClient.jsonMediaType)) }
+    suspend fun updateCron(id: String, rawJson: String): JsonElement = call { it.updateCron(id, rawJson.toRequestBody(ApiClient.jsonMediaType)) }
+    suspend fun deleteCron(id: String): JsonElement = call { it.deleteCron(id) }
+    suspend fun setWhitelist(kind: String, scope: String, name: String, enabled: Boolean): JsonElement {
+        val body = ApiClient.json.encodeToString(buildJsonObject { put("kind", kind); put("scope", scope); put("name", name); put("enabled", enabled) }).toRequestBody(ApiClient.jsonMediaType)
+        return call { it.setWhitelist(body) }
+    }
+    suspend fun deleteFile(scope: String, path: String): JsonElement = call { it.deleteFile(scope, path) }
+    suspend fun previewFile(scope: String, path: String, name: String): FilePreviewPayload = withContext(Dispatchers.IO) {
+        val (_, bundle) = bundle()
+        val response = bundle.rest.downloadFile(scope = scope, path = path)
+        if (!response.isSuccessful) error("preview failed (${response.code()})")
+        val body = response.body() ?: error("empty preview")
+        FilePreviewPayload(name, body.contentType()?.toString().orEmpty(), body.bytes())
+    }
+    suspend fun downloadFile(scope: String, path: String): String = withContext(Dispatchers.IO) {
+        val (_, bundle) = bundle()
+        val response = bundle.rest.downloadFile(scope = scope, path = path)
+        if (!response.isSuccessful) error("download failed (${response.code()})")
+        val body = response.body() ?: error("empty download")
+        val fileName = path.substringAfterLast('/').substringAfterLast('\\').ifBlank { "download.bin" }
+        val mimeType = body.contentType()?.toString() ?: "application/octet-stream"
+        val configuredTree = prefs.snapshot().downloadDirectoryUri.takeIf(String::isNotBlank)
+        if (configuredTree != null) {
+            val tree = DocumentFile.fromTreeUri(context, Uri.parse(configuredTree)) ?: error("下载目录不可访问")
+            var candidate = fileName
+            var index = 2
+            while (tree.findFile(candidate) != null) {
+                val dot = fileName.lastIndexOf('.')
+                val stem = if (dot > 0) fileName.substring(0, dot) else fileName
+                val suffix = if (dot > 0) fileName.substring(dot) else ""
+                candidate = "$stem ($index)$suffix"
+                index += 1
+            }
+            val target = tree.createFile(mimeType, candidate) ?: error("无法在所选目录创建文件")
+            context.contentResolver.openOutputStream(target.uri, "w")?.use { output ->
+                body.byteStream().use { input -> input.copyTo(output) }
+            } ?: error("无法写入下载文件")
+            return@withContext target.uri.toString()
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val target = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("无法创建系统下载文件")
+            try {
+                context.contentResolver.openOutputStream(target, "w")?.use { output ->
+                    body.byteStream().use { input -> input.copyTo(output) }
+                } ?: error("无法写入系统下载目录")
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                context.contentResolver.update(target, values, null, null)
+                return@withContext target.toString()
+            } catch (failure: Throwable) {
+                context.contentResolver.delete(target, null, null)
+                throw failure
+            }
+        }
+        val directory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        directory.mkdirs()
+        val target = java.io.File(directory, fileName)
+        body.byteStream().use { input -> target.outputStream().use(input::copyTo) }
+        target.absolutePath
+    }
+
+    suspend fun setModel(model: String): JsonElement {
+        val body = ApiClient.json.encodeToString(buildJsonObject { put("model", model) }).toRequestBody(ApiClient.jsonMediaType)
+        return call { it.setModel(body) }
+    }
+
+    suspend fun patchConfig(changes: JsonObject): JsonElement {
+        val body = ApiClient.json.encodeToString(buildJsonObject { put("changes", changes) }).toRequestBody(ApiClient.jsonMediaType)
+        return call { it.patchConfig(body) }
+    }
+
+    suspend fun streamChat(prompt: String, sessionId: String, runId: String, uploadedFiles: List<String>, onEvent: (StreamEvent) -> Unit) = withContext(Dispatchers.IO) {
+        val (_, bundle) = bundle()
+        val parser = ChatStreamParser()
+        val body = ChatRequestDto(
+            sessionId = sessionId,
+            prompt = prompt,
+            runId = runId,
+            clientId = "kemo-android",
+            uploadedFiles = uploadedFiles,
+        )
+        bundle.client.newCall(ApiClient.chatRequest(bundle, body)).execute().use { response ->
+            if (!response.isSuccessful) {
+                if (response.code == 401) onSessionExpired?.invoke()
+                error("chat failed (${response.code})")
+            }
+            val source = response.body?.source() ?: error("empty chat stream")
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                parser.parse(line)?.let(onEvent)
+            }
+        }
+    }
+
+    suspend fun changeAppPassword(accountId: String, oldPassword: String, newPassword: String): Boolean {
+        if (appPasswordConfigured(accountId) && !verifyAppPassword(accountId, oldPassword)) return false
+        secure.put(accountId, SecureStore.APP_PASSWORD_HASH, sha256(newPassword))
+        return true
+    }
+
+    suspend fun updateWidgetSummary() {
+        val data = taskPlans()
+        val items = flattenObjects(data)
+        val pending = items.count { (it["status"] as? JsonPrimitive)?.contentOrNull in setOf("pending", "approved", "awaiting_approval") }
+        val latest = items.firstNotNullOfOrNull {
+            (it["title"] as? JsonPrimitive)?.contentOrNull ?: (it["name"] as? JsonPrimitive)?.contentOrNull
+        }.orEmpty()
+        prefs.setWidgetSummary(pending, latest)
+    }
+
+    private suspend fun call(block: suspend (com.kesepain.kemoapp.data.remote.RestApi) -> retrofit2.Response<okhttp3.ResponseBody>): JsonElement {
+        val (_, bundle) = bundle()
+        val response = block(bundle.rest)
+        val text = response.body()?.string().orEmpty()
+        if (!response.isSuccessful) {
+            if (response.code() == 401) onSessionExpired?.invoke()
+            error("request failed (${response.code()})")
+        }
+        return if (text.isBlank()) JsonObject(emptyMap()) else ApiClient.json.parseToJsonElement(text)
+    }
+
+    companion object {
+        const val MAX_CREDENTIAL_AGE_SECONDS = 7L * 24L * 60L * 60L
+        private const val DEFAULT_SESSION_AGE_SECONDS = 2L * 60L * 60L
+        private const val MAX_UPLOAD_BYTES = 50L * 1024L * 1024L
+        fun accountId(baseUrl: String, username: String) = sha256("${baseUrl.trimEnd('/')}|$username").take(20)
+        fun flattenObjects(value: JsonElement): List<JsonObject> {
+            val result = mutableListOf<JsonObject>()
+            fun walk(item: JsonElement) {
+                when (item) {
+                    is JsonObject -> { result += item; item.values.forEach(::walk) }
+                    is kotlinx.serialization.json.JsonArray -> item.forEach(::walk)
+                    else -> Unit
+                }
+            }
+            walk(value)
+            return result
+        }
+        private fun sha256(value: String): String = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+}
