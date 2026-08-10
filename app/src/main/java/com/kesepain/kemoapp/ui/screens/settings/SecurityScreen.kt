@@ -33,6 +33,9 @@ import com.kesepain.kemoapp.ui.components.LoadingButton
 fun SecurityScreen(
     biometricEnabled: Boolean,
     onBiometricEnabled: (Boolean) -> Unit,
+    onBiometricRequired: () -> Unit,
+    onBiometricFailed: () -> Unit,
+    onPasswordFailed: () -> Unit,
     onChangePassword: (String, String, (Boolean) -> Unit) -> Unit,
 ) {
     val activity = LocalActivity.current as? FragmentActivity
@@ -57,11 +60,15 @@ fun SecurityScreen(
                     BusySwitch(
                         checked = biometricEnabled,
                         onCheckedChange = { target ->
-                            activity?.let { host ->
+                            val host = activity
+                            if (host == null) {
+                                onBiometricRequired()
+                            } else {
+                                onBiometricRequired()
                                 biometricBusy = true
                                 BiometricHelper.authenticate(host, authTitle, authSubtitle) { success ->
                                     biometricBusy = false
-                                    if (success) onBiometricEnabled(target)
+                                    if (success) onBiometricEnabled(target) else onBiometricFailed()
                                 }
                             }
                         },
@@ -82,6 +89,7 @@ fun SecurityScreen(
                         onClick = {
                             if (newPassword != confirmPassword || newPassword.length < 4) {
                                 resultMessage = "invalid"
+                                onPasswordFailed()
                             } else {
                                 passwordBusy = true
                                 onChangePassword(oldPassword, newPassword) { success ->
@@ -96,7 +104,7 @@ fun SecurityScreen(
                     ) { Text(stringResource(R.string.update_password)) }
                     if (resultMessage.isNotBlank()) {
                         Text(
-                            stringResource(if (resultMessage == "success") R.string.password_updated else R.string.password_update_failed),
+                            stringResource(if (resultMessage == "success") R.string.feedback_password_updated else R.string.feedback_password_failed),
                             color = if (resultMessage == "success") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                         )

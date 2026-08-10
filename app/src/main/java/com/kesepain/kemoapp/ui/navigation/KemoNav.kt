@@ -128,7 +128,7 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     viewModel::removeChatAttachment,
                 )
             }
-            composable("tasks") { TasksScreen(state.tasks, state.cron, pendingKeys, viewModel::loadTasks, viewModel::taskAction) }
+            composable("tasks") { TasksScreen(state.tasks, state.cron, pendingKeys, viewModel::loadTasks, viewModel::taskAction, viewModel::updateCron) }
             composable("status") { StatusScreen(state.status, "refresh:status" in pendingKeys, viewModel::loadStatus) }
             composable("modules") { ModulesScreen(state.expands, state.senses, pendingKeys, viewModel::loadModules, viewModel::setWhitelist) }
             composable("files") {
@@ -182,7 +182,14 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                 NotificationsScreen(state.preferences.notifications, viewModel::setNotifications)
             }
             composable("security") {
-                SecurityScreen(state.preferences.biometricEnabled, viewModel::setBiometricEnabled, viewModel::changeAppPassword)
+                SecurityScreen(
+                    state.preferences.biometricEnabled,
+                    viewModel::setBiometricEnabled,
+                    viewModel::reportBiometricRequired,
+                    viewModel::reportBiometricFailed,
+                    viewModel::reportPasswordFailed,
+                    viewModel::changeAppPassword,
+                )
             }
             composable("models") { ModelsScreen(state.models, pendingKeys, viewModel::loadModels, viewModel::selectModel) }
             composable("agent-config") {

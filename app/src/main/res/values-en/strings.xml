@@ -258,4 +258,21 @@
     <string name="restore_default_download_directory">Restore system Downloads folder</string>
     <string name="push_notifications">Push notifications</string>
     <string name="push_notifications_summary">Receive agent status and message notifications</string>
+    <string name="feedback_module_updated">Module setting updated</string>
+    <string name="feedback_cron_saved">Scheduled task saved</string>
+    <string name="feedback_cron_deleted">Scheduled task deleted</string>
+    <string name="feedback_config_saved">Configuration saved</string>
+    <string name="feedback_uploaded">File uploaded</string>
+    <string name="feedback_deleted">File deleted</string>
+    <string name="feedback_downloaded">File downloaded</string>
+    <string name="feedback_model_switched">Model switched</string>
+    <string name="feedback_task_approved">Task approved</string>
+    <string name="feedback_task_paused">Task paused</string>
+    <string name="feedback_task_resumed">Task resumed</string>
+    <string name="feedback_task_aborted">Task aborted</string>
+    <string name="feedback_biometric_required">Authenticate to change this setting</string>
+    <string name="feedback_biometric_failed">Authentication failed. Please try again</string>
+    <string name="feedback_password_updated">App password updated</string>
+    <string name="feedback_password_failed">Password update failed. Check the current password and new password format</string>
+    <string name="feedback_switch_pending">Updating setting</string>
 </resources>

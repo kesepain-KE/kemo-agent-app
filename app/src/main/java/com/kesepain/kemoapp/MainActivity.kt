@@ -89,7 +89,7 @@ class MainActivity : FragmentActivity() {
                         UnlockScreen(
                             state.error,
                             onBiometric = if (state.preferences.biometricEnabled) {
-                                { BiometricHelper.authenticate(this, title, subtitle) { if (it) viewModel.unlockWithBiometric() } }
+                                { BiometricHelper.authenticate(this, title, subtitle) { if (it) viewModel.unlockWithBiometric() else viewModel.reportBiometricFailed() } }
                             } else null,
                             onPassword = viewModel::unlockWithPassword,
                         )

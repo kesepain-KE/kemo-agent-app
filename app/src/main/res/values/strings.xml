@@ -258,4 +258,21 @@
     <string name="restore_default_download_directory">恢复系统默认下载目录</string>
     <string name="push_notifications">推送通知</string>
     <string name="push_notifications_summary">接收智能体状态与消息通知</string>
+    <string name="feedback_module_updated">模块设置已更新</string>
+    <string name="feedback_cron_saved">定时任务已保存</string>
+    <string name="feedback_cron_deleted">定时任务已删除</string>
+    <string name="feedback_config_saved">配置已保存</string>
+    <string name="feedback_uploaded">文件已上传</string>
+    <string name="feedback_deleted">文件已删除</string>
+    <string name="feedback_downloaded">文件已下载</string>
+    <string name="feedback_model_switched">模型已切换</string>
+    <string name="feedback_task_approved">任务已批准</string>
+    <string name="feedback_task_paused">任务已暂停</string>
+    <string name="feedback_task_resumed">任务已恢复</string>
+    <string name="feedback_task_aborted">任务已中止</string>
+    <string name="feedback_biometric_required">请先完成身份验证</string>
+    <string name="feedback_biometric_failed">身份验证失败，请重试</string>
+    <string name="feedback_password_updated">App 密码已更新</string>
+    <string name="feedback_password_failed">密码更新失败，请检查旧密码和新密码格式</string>
+    <string name="feedback_switch_pending">正在更新设置</string>
 </resources>
