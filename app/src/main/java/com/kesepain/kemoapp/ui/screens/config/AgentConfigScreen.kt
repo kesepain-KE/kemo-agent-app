@@ -1,26 +1,18 @@
 package com.kesepain.kemoapp.ui.screens.config
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +29,7 @@ import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.ui.components.BusySwitch
 import com.kesepain.kemoapp.ui.components.LoadingButton
 import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
+import com.kesepain.kemoapp.ui.components.ModelPickerField
 import com.kesepain.kemoapp.ui.components.records
 import com.kesepain.kemoapp.ui.components.stringItems
 import kotlinx.serialization.json.JsonElement
@@ -57,7 +50,8 @@ fun AgentConfigScreen(
     val modelNames = (
         modelRecords.map { it.text("id", "name", "model") } +
             models.stringItems("models", "items", "data") +
-            draft.model
+            listOf(draft.model, draft.agentDefault, draft.agentCheap, draft.agentReasoning) +
+            draft.multimodal.values
         ).filter(String::isNotBlank).distinct()
     LaunchedEffect(value) {
         val loaded = UserConfigDraft.from(value)
@@ -87,16 +81,25 @@ fun AgentConfigScreen(
                         FilterChip(selected = draft.providerType == type, onClick = { draft = draft.copy(providerType = type) }, label = { Text(type) })
                     }
                 }
+                ModelPickerField(
+                    label = stringResource(R.string.model),
+                    selected = draft.model,
+                    models = modelNames,
+                ) { draft = draft.copy(model = it) }
                 if (draft.providerType.equals("kemo", ignoreCase = true)) {
-                    KemoModelSelector(
-                        selected = draft.model,
-                        models = modelNames,
-                        discoveryEnabled = savedProviderType.equals("kemo", ignoreCase = true),
-                        onRefresh = onModelsRefresh,
-                        refreshing = modelsRefreshing,
-                    ) { draft = draft.copy(model = it) }
-                } else {
-                    ConfigTextField(stringResource(R.string.model), draft.model) { draft = draft.copy(model = it) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(if (savedProviderType.equals("kemo", ignoreCase = true)) R.string.kemo_models_secure_hint else R.string.kemo_models_save_first),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        LoadingOutlinedButton(
+                            onClick = onModelsRefresh,
+                            enabled = savedProviderType.equals("kemo", ignoreCase = true),
+                            loading = modelsRefreshing,
+                        ) { Text(stringResource(R.string.refresh)) }
+                    }
                 }
                 ConfigTextField(stringResource(R.string.base_url), draft.baseUrl) { draft = draft.copy(baseUrl = it) }
                 OutlinedTextField(
@@ -108,7 +111,6 @@ fun AgentConfigScreen(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
-                ConfigTextField(stringResource(R.string.reasoning_effort), draft.reasoningEffort) { draft = draft.copy(reasoningEffort = it) }
                 ConfigToggleRow(stringResource(R.string.streaming_output), draft.stream, busy = busy) { draft = draft.copy(stream = it) }
                 ConfigToggleRow(stringResource(R.string.support_image_input), draft.imageInput, busy = busy) { draft = draft.copy(imageInput = it) }
                 ConfigToggleRow(stringResource(R.string.support_audio_input), draft.audioInput, busy = busy) { draft = draft.copy(audioInput = it) }
@@ -118,9 +120,9 @@ fun AgentConfigScreen(
         }
         item {
             ConfigCard(stringResource(R.string.subagent_models)) {
-                ConfigTextField(stringResource(R.string.agent_model_default), draft.agentDefault) { draft = draft.copy(agentDefault = it) }
-                ConfigTextField(stringResource(R.string.agent_model_cheap), draft.agentCheap) { draft = draft.copy(agentCheap = it) }
-                ConfigTextField(stringResource(R.string.agent_model_reasoning), draft.agentReasoning) { draft = draft.copy(agentReasoning = it) }
+                ModelPickerField(stringResource(R.string.agent_model_default), draft.agentDefault, modelNames) { draft = draft.copy(agentDefault = it) }
+                ModelPickerField(stringResource(R.string.agent_model_cheap), draft.agentCheap, modelNames) { draft = draft.copy(agentCheap = it) }
+                ModelPickerField(stringResource(R.string.agent_model_reasoning), draft.agentReasoning, modelNames) { draft = draft.copy(agentReasoning = it) }
             }
         }
         item {
@@ -132,7 +134,7 @@ fun AgentConfigScreen(
                     }
                 }
                 UserConfigDraft.MULTIMODAL_KEYS.forEach { key ->
-                    ConfigTextField(multimodalLabel(key), draft.multimodal[key].orEmpty()) { updated ->
+                    ModelPickerField(multimodalLabel(key), draft.multimodal[key].orEmpty(), modelNames) { updated ->
                         draft = draft.copy(multimodal = draft.multimodal + (key to updated))
                     }
                 }
@@ -162,61 +164,6 @@ fun AgentConfigScreen(
                 ConfigToggleRow(stringResource(R.string.task_auto_accept), draft.taskPlanAutoAccept, busy = busy) { draft = draft.copy(taskPlanAutoAccept = it) }
             }
         }
-    }
-}
-
-@Composable
-private fun KemoModelSelector(
-    selected: String,
-    models: List<String>,
-    discoveryEnabled: Boolean,
-    onRefresh: () -> Unit,
-    refreshing: Boolean,
-    onSelected: (String) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Text(stringResource(R.string.kemo_model_selection), style = MaterialTheme.typography.titleSmall)
-    Box(Modifier.fillMaxWidth()) {
-        OutlinedButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
-            Text(selected.ifBlank { stringResource(R.string.choose_model) })
-        }
-    }
-    AnimatedVisibility(visible = expanded && models.isNotEmpty()) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        ) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                models.forEach { model ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            expanded = false
-                            onSelected(model)
-                        }.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(
-                            selected = model == selected,
-                            onClick = {
-                                expanded = false
-                                onSelected(model)
-                            },
-                        )
-                        Text(model, modifier = Modifier.padding(start = 6.dp))
-                    }
-                }
-            }
-        }
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            stringResource(if (discoveryEnabled) R.string.kemo_models_secure_hint else R.string.kemo_models_save_first),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
-        )
-        LoadingOutlinedButton(onClick = onRefresh, enabled = discoveryEnabled, loading = refreshing) { Text(stringResource(R.string.refresh)) }
     }
 }
 
