@@ -17,10 +17,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -32,6 +36,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.kesepain.kemoapp.AppUiState
 import com.kesepain.kemoapp.MainViewModel
+import com.kesepain.kemoapp.UiMessageType
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.ui.screens.chat.ChatScreen
 import com.kesepain.kemoapp.ui.screens.connect.ConnectScreen
@@ -48,6 +53,7 @@ import com.kesepain.kemoapp.ui.screens.settings.SecurityScreen
 import com.kesepain.kemoapp.ui.screens.settings.VersionScreen
 import com.kesepain.kemoapp.ui.screens.status.StatusScreen
 import com.kesepain.kemoapp.ui.screens.tasks.TasksScreen
+import kotlinx.coroutines.flow.collectLatest
 
 private data class Tab(val route: String, val label: Int, val icon: ImageVector)
 private val tabs = listOf(
@@ -61,13 +67,24 @@ private val tabs = listOf(
 @Composable
 fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = false, onLanguageChanged: (String) -> Unit) {
     val navController = rememberNavController()
+    val snackbarHostState = remember { SnackbarHostState() }
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route.orEmpty()
     val mainRoute = tabs.any { it.route == route }
     val providerType = UserConfigDraft.from(state.agentConfig).providerType
     LaunchedEffect(Unit) { viewModel.loadDashboard() }
+    LaunchedEffect(viewModel) {
+        viewModel.messages.collectLatest { message ->
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(
+                message = message.text,
+                duration = if (message.type == UiMessageType.Error) SnackbarDuration.Long else SnackbarDuration.Short,
+            )
+        }
+    }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (mainRoute) NavigationBar(
                 modifier = Modifier.fillMaxWidth(),
@@ -191,3 +208,4 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
         }
     }
 }
+

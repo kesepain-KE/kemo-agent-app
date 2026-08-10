@@ -31,8 +31,12 @@ import com.kesepain.kemoapp.security.UnlockManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
@@ -75,6 +79,10 @@ private fun appDeviceId(application: Application): String {
     return value
 }
 
+enum class UiMessageType { Info, Success, Error }
+
+data class UiMessage(val text: String, val type: UiMessageType)
+
 data class AppUiState(
     val preferences: AppPreferences = AppPreferences(),
     val configured: Boolean = false,
@@ -112,8 +120,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = KemoRepository(application)
     private val deviceId = appDeviceId(application)
     private val _state = MutableStateFlow(AppUiState())
+    private val _messages = MutableSharedFlow<UiMessage>(
+        extraBufferCapacity = 16,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    private val _pendingKeys = MutableStateFlow<Set<String>>(emptySet())
     private val unlockManager = UnlockManager { _state.value.preferences.autoLockMinutes }
     val state: StateFlow<AppUiState> = _state.asStateFlow()
+    val messages: SharedFlow<UiMessage> = _messages.asSharedFlow()
+    val pendingKeys: StateFlow<Set<String>> = _pendingKeys.asStateFlow()
     private var eventSocket: EventSocket? = null
     private var chatRestored = false
     private var persistChatJob: Job? = null
@@ -348,7 +363,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadStatus() = viewModelScope.launch { loadStatusInternal() }
     fun loadModules() = viewModelScope.launch { loadModulesInternal() }
     fun loadFiles(scope: String, path: String, page: Int = 1) = viewModelScope.launch { loadFileDirectory(scope, path, page) }
-    fun uploadFile(uri: Uri, directory: String) = launchBusy {
+    fun uploadFile(uri: Uri, directory: String) = launchBusy("upload") {
         repo.uploadFile(uri, directory)
         loadFileDirectory("upload", directory, 1)
     }
@@ -361,17 +376,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .onFailure { failure -> _state.update { it.copy(error = failure.message.orEmpty()) } }
     }
 
-    fun taskAction(id: String, action: String) = launchBusy { repo.taskAction(id, action); loadTasksInternal() }
-    fun createCron(rawJson: String) = launchBusy { repo.createCron(rawJson); loadTasksInternal() }
-    fun updateCron(id: String, rawJson: String) = launchBusy { repo.updateCron(id, rawJson); loadTasksInternal() }
-    fun deleteCron(id: String) = launchBusy { repo.deleteCron(id); loadTasksInternal() }
-    fun setWhitelist(kind: String, scope: String, name: String, enabled: Boolean) = launchBusy { repo.setWhitelist(kind, scope, name, enabled); loadModulesInternal() }
-    fun deleteFile(scope: String, path: String) = launchBusy {
+    fun taskAction(id: String, action: String) = launchBusy("task:$id:$action") { repo.taskAction(id, action); loadTasksInternal() }
+    fun createCron(rawJson: String) = launchBusy("cron:new") { repo.createCron(rawJson); loadTasksInternal() }
+    fun updateCron(id: String, rawJson: String) = launchBusy("cron:$id") { repo.updateCron(id, rawJson); loadTasksInternal() }
+    fun deleteCron(id: String) = launchBusy("cron:$id") { repo.deleteCron(id); loadTasksInternal() }
+    fun setWhitelist(kind: String, scope: String, name: String, enabled: Boolean) = launchBusy("whitelist:$kind:$scope:$name") { repo.setWhitelist(kind, scope, name, enabled); loadModulesInternal() }
+    fun deleteFile(scope: String, path: String) = launchBusy("file:$scope:$path") {
         repo.deleteFile(scope, path)
         val listing = if (scope == "upload") _state.value.uploadFiles else _state.value.generatedFiles
         loadFileDirectory(scope, listing.fileListingPath(), listing.fileListingPage())
     }
-    fun downloadFile(scope: String, path: String) = launchBusy { repo.downloadFile(scope, path) }
+    fun downloadFile(scope: String, path: String) = launchBusy("download:$scope:$path") { repo.downloadFile(scope, path) }
     fun previewFile(scope: String, path: String, name: String) = launchBusy {
         val payload = repo.previewFile(scope, path, name)
         val extension = name.substringAfterLast('.', "").lowercase()
@@ -384,8 +399,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun clearFilePreview() = _state.update { it.copy(filePreview = null) }
     fun searchKnowledge(query: String) = viewModelScope.launch { loadValue({ repo.searchKnowledge(query) }) { value -> copy(knowledge = value) } }
-    fun selectModel(model: String) = launchBusy { repo.setModel(model); loadModels() }
-    fun patchAgentConfig(changes: JsonObject) = launchBusy { repo.patchConfig(changes); loadAgentConfig() }
+    fun selectModel(model: String) = launchBusy("model") { repo.setModel(model); loadModels() }
+    fun patchAgentConfig(changes: JsonObject) = launchBusy("config") { repo.patchConfig(changes); loadAgentConfig() }
 
     fun switchAccount(id: String) {
         viewModelScope.launch {
@@ -469,10 +484,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .onFailure { failure -> _state.update { it.copy(error = failure.message.orEmpty()) } }
     }
 
-    private fun launchBusy(block: suspend () -> Unit) {
+    private fun launchBusy(block: suspend () -> Unit) = launchBusyInternal(key = null, successMessage = null, block = block)
+
+    private fun launchBusy(key: String, successMessage: Int? = null, block: suspend () -> Unit) =
+        launchBusyInternal(key = key, successMessage = successMessage, block = block)
+
+    private fun launchBusyInternal(key: String?, successMessage: Int?, block: suspend () -> Unit) {
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = "") }
-            runCatching { block() }.onFailure { failure -> _state.update { it.copy(error = failure.message.orEmpty()) } }
+            key?.let { pendingKey -> _pendingKeys.update { it + pendingKey } }
+            runCatching { block() }
+                .onSuccess {
+                    successMessage?.let { message ->
+                        _messages.emit(UiMessage(getApplication<Application>().getString(message), UiMessageType.Success))
+                    }
+                }
+                .onFailure { failure ->
+                    _state.update { it.copy(error = failure.message.orEmpty()) }
+                    _messages.emit(UiMessage(getApplication<Application>().getString(R.string.error_generic), UiMessageType.Error))
+                }
+            key?.let { pendingKey -> _pendingKeys.update { it - pendingKey } }
             _state.update { it.copy(busy = false) }
         }
     }
@@ -565,3 +596,4 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 }
+
