@@ -1,6 +1,10 @@
 # kemo-agent-app
 
 <p align="center">
+  <img src="kemo-agent-app.png" alt="kemo-agent-app logo" width="200">
+</p>
+
+<p align="center">
   <a href="readme.md">简体中文</a> · <strong>English</strong>
 </p>
 
