@@ -23,13 +23,16 @@ interface RestApi {
     @DELETE("v1/conversations/{id}") suspend fun deleteConversation(@Path("id") id: String): Response<ResponseBody>
     @POST("v1/conversations/{id}/close") suspend fun closeConversation(@Path("id") id: String): Response<ResponseBody>
     @POST("v1/conversations/{id}/compress") suspend fun compressConversation(@Path("id") id: String): Response<ResponseBody>
+    @POST("v1/conversations/{id}/undo-last-round") suspend fun undoLastRound(@Path("id") id: String, @Body body: RequestBody): Response<ResponseBody>
+    @POST("v1/guidance") suspend fun submitGuidance(@Body body: RequestBody): Response<ResponseBody>
+    @POST("v1/runs/{id}/cancel") suspend fun cancelRun(@Path("id") id: String): Response<ResponseBody>
     @GET("v1/task_plans") suspend fun taskPlans(): Response<ResponseBody>
     @POST("v1/task_plans/{id}/{action}") suspend fun taskAction(@Path("id") id: String, @Path("action") action: String): Response<ResponseBody>
     @GET("v1/cron") suspend fun cron(): Response<ResponseBody>
     @POST("v1/cron") suspend fun createCron(@Body body: RequestBody): Response<ResponseBody>
     @PUT("v1/cron/{id}") suspend fun updateCron(@Path("id") id: String, @Body body: RequestBody): Response<ResponseBody>
     @DELETE("v1/cron/{id}") suspend fun deleteCron(@Path("id") id: String): Response<ResponseBody>
-    @GET("v1/status") suspend fun status(): Response<ResponseBody>
+    @GET("v1/status") suspend fun status(@Query("session_id") sessionId: String = ""): Response<ResponseBody>
     @GET("v1/expands") suspend fun expands(): Response<ResponseBody>
     @GET("v1/expands/data") suspend fun expandsData(): Response<ResponseBody>
     @GET("v1/senses") suspend fun senses(): Response<ResponseBody>

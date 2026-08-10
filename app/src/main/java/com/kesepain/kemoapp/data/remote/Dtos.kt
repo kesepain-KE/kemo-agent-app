@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonElement
     @SerialName("run_id") val runId: String,
     @SerialName("client_id") val clientId: String,
     @SerialName("uploaded_files") val uploadedFiles: List<String> = emptyList(),
+    @SerialName("reasoning_effort") val reasoningEffort: String = "medium",
 )
 @Serializable data class EventDto(val type: String, val ts: Long = 0, val data: JsonElement? = null)
 data class ApiSecrets(val deviceToken: String, val sessionToken: String)

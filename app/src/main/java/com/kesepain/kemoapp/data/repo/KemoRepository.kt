@@ -8,6 +8,7 @@ import android.os.Environment
 import android.provider.OpenableColumns
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
+import androidx.core.content.FileProvider
 import com.kesepain.kemoapp.data.local.AccountConfig
 import com.kesepain.kemoapp.data.local.Prefs
 import com.kesepain.kemoapp.data.local.SecureStore
@@ -35,6 +36,7 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import okio.source
+import java.io.File
 import java.util.UUID
 
 data class FilePreviewPayload(val name: String, val mimeType: String, val bytes: ByteArray)
@@ -177,6 +179,25 @@ class KemoRepository(private val context: Context) {
 
     suspend fun appPasswordConfigured(accountId: String): Boolean = secure.get(accountId, SecureStore.APP_PASSWORD_HASH).isNotBlank()
     suspend fun verifyAppPassword(accountId: String, value: String): Boolean = secure.get(accountId, SecureStore.APP_PASSWORD_HASH) == sha256(value)
+    suspend fun deleteAccount(accountId: String) {
+        synchronized(this) {
+            if (ephemeralCredentials?.first == accountId) ephemeralCredentials = null
+        }
+        secure.clear(
+            accountId,
+            listOf(
+                SecureStore.DEVICE_TOKEN,
+                SecureStore.USER_PASSWORD,
+                SecureStore.SESSION_TOKEN,
+                SecureStore.SESSION_EXPIRES_AT,
+                SecureStore.REMEMBER_CREDENTIALS,
+                SecureStore.CREDENTIALS_EXPIRE_AT,
+                SecureStore.APP_PASSWORD_HASH,
+            ),
+        )
+        prefs.removeAccount(accountId)
+    }
+
     suspend fun clearSession(accountId: String) {
         synchronized(this) {
             if (ephemeralCredentials?.first == accountId) ephemeralCredentials = null
@@ -207,9 +228,32 @@ class KemoRepository(private val context: Context) {
     suspend fun deleteConversation(id: String): JsonElement = call { it.deleteConversation(id) }
     suspend fun closeConversation(id: String): JsonElement = call { it.closeConversation(id) }
     suspend fun compressConversation(id: String): JsonElement = call { it.compressConversation(id) }
+    suspend fun undoLastRound(id: String, expectedRound: Int, prompt: String): JsonElement {
+        val body = ApiClient.json.encodeToString(
+            buildJsonObject {
+                put("expected_round", expectedRound)
+                put("prompt", prompt)
+            },
+        ).toRequestBody(ApiClient.jsonMediaType)
+        return call { it.undoLastRound(id, body) }
+    }
+    suspend fun submitGuidance(runId: String, guidance: String, guidanceId: String, uploadedFiles: List<String>): JsonElement {
+        val body = ApiClient.json.encodeToString(
+            buildJsonObject {
+                put("run_id", runId)
+                put("guidance", guidance)
+                put("guidance_id", guidanceId)
+                put("uploaded_files", kotlinx.serialization.json.buildJsonArray {
+                    uploadedFiles.forEach { add(JsonPrimitive(it)) }
+                })
+            },
+        ).toRequestBody(ApiClient.jsonMediaType)
+        return call { it.submitGuidance(body) }
+    }
+    suspend fun cancelRun(runId: String): JsonElement = call { it.cancelRun(runId) }
     suspend fun taskPlans(): JsonElement = call { it.taskPlans() }
     suspend fun cron(): JsonElement = call { it.cron() }
-    suspend fun status(): JsonElement = call { it.status() }
+    suspend fun status(sessionId: String = ""): JsonElement = call { it.status(sessionId) }
     suspend fun expands(): JsonElement = call { it.expands() }
     suspend fun expandsData(): JsonElement = call { it.expandsData() }
     suspend fun senses(): JsonElement = call { it.senses() }
@@ -227,7 +271,7 @@ class KemoRepository(private val context: Context) {
             }
         }
         val safeName = displayName.substringAfterLast('/').substringAfterLast('\\').trim().ifBlank { "upload.bin" }.take(240)
-        require(length < 0 || length <= MAX_UPLOAD_BYTES) { "文件超过最大限制 50 MB" }
+        require(length < 0 || length <= MAX_UPLOAD_BYTES) { "文件超过最大限制 80 MB" }
         val mediaType = resolver.getType(uri)?.toMediaTypeOrNull()
         val body = object : RequestBody() {
             override fun contentType() = mediaType
@@ -246,6 +290,38 @@ class KemoRepository(private val context: Context) {
             error("upload failed (${response.code()})")
         }
         if (text.isBlank()) JsonObject(emptyMap()) else ApiClient.json.parseToJsonElement(text)
+    }
+
+    suspend fun cacheChatMedia(path: String, name: String, scope: String = "download"): String = withContext(Dispatchers.IO) {
+        val (_, bundle) = bundle()
+        val response = bundle.rest.downloadFile(scope = scope, path = path)
+        if (!response.isSuccessful) {
+            if (response.code() == 401) onSessionExpired?.invoke()
+            error("media download failed (${response.code()})")
+        }
+        val body = response.body() ?: error("empty media response")
+        val declaredLength = body.contentLength()
+        require(declaredLength < 0 || declaredLength <= MAX_CHAT_MEDIA_CACHE_BYTES) { "媒体文件过大，请下载后查看" }
+        val safeName = name.substringAfterLast('/').substringAfterLast('\\')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .take(180)
+            .ifBlank { "media.bin" }
+        val directory = File(context.cacheDir, "chat-media").apply { mkdirs() }
+        val target = File(directory, "${sha256("$scope:$path").take(16)}-$safeName")
+        body.byteStream().use { input ->
+            target.outputStream().use { output ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var total = 0L
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    require(total <= MAX_CHAT_MEDIA_CACHE_BYTES) { "媒体文件过大，请下载后查看" }
+                    output.write(buffer, 0, count)
+                }
+            }
+        }
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", target).toString()
     }
     suspend fun knowledge(): JsonElement = call { it.knowledge() }
     suspend fun searchKnowledge(query: String): JsonElement = call { it.knowledgeSearch(query) }
@@ -344,7 +420,7 @@ class KemoRepository(private val context: Context) {
         return call { it.patchConfig(body) }
     }
 
-    suspend fun streamChat(prompt: String, sessionId: String, runId: String, uploadedFiles: List<String>, onEvent: (StreamEvent) -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun streamChat(prompt: String, sessionId: String, runId: String, uploadedFiles: List<String>, reasoningEffort: String, onEvent: (StreamEvent) -> Unit) = withContext(Dispatchers.IO) {
         val (_, bundle) = bundle()
         val parser = ChatStreamParser()
         val body = ChatRequestDto(
@@ -353,17 +429,35 @@ class KemoRepository(private val context: Context) {
             runId = runId,
             clientId = "kemo-android",
             uploadedFiles = uploadedFiles,
+            reasoningEffort = reasoningEffort,
         )
-        bundle.client.newCall(ApiClient.chatRequest(bundle, body)).execute().use { response ->
+        // An SSE response can legitimately wait longer than OkHttp's 10-second default
+        // read timeout before the first token arrives. Use an unbounded read timeout for
+        // this single streaming call while keeping normal REST calls protected by the
+        // default client timeout.
+        val streamClient = bundle.client.newBuilder()
+            .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build()
+        streamClient.newCall(ApiClient.chatRequest(bundle, body)).execute().use { response ->
             if (!response.isSuccessful) {
                 if (response.code == 401) onSessionExpired?.invoke()
                 error("chat failed (${response.code})")
             }
             val source = response.body?.source() ?: error("empty chat stream")
+            val dataLines = mutableListOf<String>()
+            fun dispatchFrame() {
+                if (dataLines.isEmpty()) return
+                parser.parsePayload(dataLines.joinToString("\n"))?.let(onEvent)
+                dataLines.clear()
+            }
             while (!source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
-                parser.parse(line)?.let(onEvent)
+                when {
+                    line.isBlank() -> dispatchFrame()
+                    line.startsWith("data:") -> dataLines += line.removePrefix("data:").trimStart()
+                }
             }
+            dispatchFrame()
         }
     }
 
@@ -397,7 +491,8 @@ class KemoRepository(private val context: Context) {
     companion object {
         const val MAX_CREDENTIAL_AGE_SECONDS = 7L * 24L * 60L * 60L
         private const val DEFAULT_SESSION_AGE_SECONDS = 2L * 60L * 60L
-        private const val MAX_UPLOAD_BYTES = 50L * 1024L * 1024L
+        private const val MAX_UPLOAD_BYTES = 80L * 1024L * 1024L
+        private const val MAX_CHAT_MEDIA_CACHE_BYTES = 200L * 1024L * 1024L
         fun accountId(baseUrl: String, username: String) = sha256("${baseUrl.trimEnd('/')}|$username").take(20)
         fun flattenObjects(value: JsonElement): List<JsonObject> {
             val result = mutableListOf<JsonObject>()

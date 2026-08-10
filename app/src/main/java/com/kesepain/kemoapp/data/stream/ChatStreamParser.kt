@@ -2,6 +2,7 @@ package com.kesepain.kemoapp.data.stream
 
 import com.kesepain.kemoapp.data.remote.ApiClient
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -9,8 +10,9 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 
-@Serializable enum class ChatRole { USER, ASSISTANT }
+@Serializable enum class ChatRole { USER, ASSISTANT, GUIDANCE }
 @Serializable enum class ToolStatus { RUNNING, SUCCESS, FAILED }
+@Serializable enum class GuidanceStatus { SUBMITTING, ACCEPTED, QUEUED, COMPLETED, ERROR }
 
 @Serializable
 data class ToolCallUi(
@@ -19,6 +21,8 @@ data class ToolCallUi(
     val arguments: String,
     val status: ToolStatus,
     val resultPreview: String = "",
+    val startedAtMs: Long = 0,
+    val elapsedMs: Long = 0,
 )
 
 @Serializable
@@ -29,7 +33,31 @@ data class ChatUsageUi(
 )
 
 @Serializable
-data class ChatAttachmentUi(val name: String, val path: String)
+data class ChatAttachmentUi(
+    val name: String,
+    val path: String,
+    val mimeType: String = "application/octet-stream",
+    val mediaKind: String = "file",
+    val size: Long = 0,
+    val localUri: String = "",
+    val loading: Boolean = false,
+    val error: String = "",
+)
+
+@Serializable
+data class ChatMediaUi(
+    val assetId: String,
+    val type: String,
+    val name: String,
+    val path: String,
+    val mimeType: String = "application/octet-stream",
+    val size: Long = 0,
+    val checksumSha256: String = "",
+    val durationMs: Long = 0,
+    val localUri: String = "",
+    val loading: Boolean = false,
+    val error: String = "",
+)
 
 @Serializable
 data class ChatEntry(
@@ -40,6 +68,8 @@ data class ChatEntry(
     val tools: List<ToolCallUi> = emptyList(),
     val usage: ChatUsageUi? = null,
     val attachments: List<ChatAttachmentUi> = emptyList(),
+    val media: List<ChatMediaUi> = emptyList(),
+    val guidanceStatus: GuidanceStatus? = null,
     val startedAtMs: Long = 0,
 )
 
@@ -47,7 +77,8 @@ sealed interface StreamEvent {
     data class Reasoning(val text: String) : StreamEvent
     data class Text(val text: String) : StreamEvent
     data class ToolStart(val call: ToolCallUi) : StreamEvent
-    data class ToolEnd(val callId: String, val status: ToolStatus, val resultPreview: String) : StreamEvent
+    data class ToolEnd(val callId: String, val status: ToolStatus, val resultPreview: String, val elapsedMs: Long = 0) : StreamEvent
+    data class Media(val value: ChatMediaUi) : StreamEvent
     data class Usage(val value: ChatUsageUi) : StreamEvent
     data class Error(val message: String) : StreamEvent
     data class Done(val value: ChatUsageUi?) : StreamEvent
@@ -56,18 +87,24 @@ sealed interface StreamEvent {
 class ChatStreamParser {
     fun parse(line: String): StreamEvent? {
         if (!line.startsWith("data:")) return null
-        val payload = line.removePrefix("data:").trim()
+        return parsePayload(line.removePrefix("data:").trim())
+    }
+
+    fun parsePayload(payload: String): StreamEvent? {
         if (payload.isBlank()) return null
         if (payload == "[DONE]") return StreamEvent.Done(null)
         val root = runCatching { ApiClient.json.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return null
-        return when (root.text("type")) {
-            "reasoning_delta" -> root.deltaText()?.let(StreamEvent::Reasoning)
-            "text_delta" -> root.deltaText()?.let(StreamEvent::Text)
-            "tool_call_start" -> parseToolStart(root)
-            "tool_call_result" -> parseToolEnd(root)
-            "usage" -> root.usageUi()?.let(StreamEvent::Usage)
-            "error" -> StreamEvent.Error(root["error"].preview(500).ifBlank { root.text("message") })
-            "done" -> StreamEvent.Done(root.usageUi(includeElapsed = true))
+        val nested = root["data"] as? JsonObject
+        val eventRoot = nested ?: root
+        return when (root.text("type", "event").ifBlank { eventRoot.text("type", "event") }) {
+            "reasoning_delta", "reasoning" -> eventRoot.deltaText()?.let(StreamEvent::Reasoning)
+            "text_delta", "message_delta", "content_delta", "text" -> eventRoot.deltaText()?.let(StreamEvent::Text)
+            "tool_call_start" -> parseToolStart(eventRoot)
+            "tool_call_result", "tool_call_end" -> parseToolEnd(eventRoot)
+            "media_output" -> parseMedia(eventRoot)
+            "usage" -> eventRoot.usageUi()?.let(StreamEvent::Usage)
+            "error" -> StreamEvent.Error(eventRoot.errorText().ifBlank { "Response stream failed" })
+            "done", "completed" -> StreamEvent.Done(eventRoot.usageUi(includeElapsed = true))
             else -> null
         }
     }
@@ -91,10 +128,59 @@ class ChatStreamParser {
             callId = callId,
             status = if (failed) ToolStatus.FAILED else ToolStatus.SUCCESS,
             resultPreview = result.preview(MAX_TOOL_DETAIL),
+            elapsedMs = (root["metadata"] as? JsonObject)?.long("elapsed_ms") ?: 0L,
         )
     }
 
-    private fun JsonObject.deltaText(): String? = text("delta", "text", "content").takeIf { it.isNotEmpty() }
+    private fun parseMedia(root: JsonObject): StreamEvent.Media? {
+        val metadata = root["metadata"] as? JsonObject
+        val artifact = (root["result"] as? JsonObject)
+            ?: (metadata?.get("artifact") as? JsonObject)
+            ?: return null
+        val assetId = artifact.text("asset_id", "id")
+        val path = artifact.text("path", "project_path")
+        val name = artifact.text("name").ifBlank { path.substringAfterLast('/').substringAfterLast('\\') }
+        if (assetId.isBlank() || path.isBlank() || name.isBlank()) return null
+        return StreamEvent.Media(
+            ChatMediaUi(
+                assetId = assetId,
+                type = artifact.text("type", "media_kind").ifBlank { "file" },
+                name = name,
+                path = path,
+                mimeType = artifact.text("mime_type").ifBlank { "application/octet-stream" },
+                size = artifact.long("size"),
+                checksumSha256 = artifact.text("checksum_sha256"),
+                durationMs = artifact.long("duration_ms"),
+            ),
+        )
+    }
+
+    private fun JsonObject.deltaText(): String? {
+        for (key in listOf("content", "delta", "text", "message", "value")) {
+            val value = this[key] ?: continue
+            val text = value.plainText()
+            if (text.isNotEmpty()) return text
+        }
+        return null
+    }
+
+    private fun JsonObject.errorText(): String {
+        val error = this["error"]
+        if (error is JsonObject) return error.text("message", "detail", "error").ifBlank { error.preview(500) }
+        return error.plainText().ifBlank { text("message", "detail") }
+    }
+
+    private fun JsonElement?.plainText(): String = when (this) {
+        null -> ""
+        is JsonPrimitive -> contentOrNull.orEmpty()
+        is JsonArray -> mapNotNull { item -> item.plainText().takeIf(String::isNotBlank) }.joinToString("")
+        is JsonObject -> {
+            for (key in listOf("content", "text", "delta", "message", "value")) {
+                this[key]?.plainText()?.takeIf(String::isNotBlank)?.let { return it }
+            }
+            ""
+        }
+    }
 
     private fun JsonObject.usageUi(includeElapsed: Boolean = false): ChatUsageUi? {
         val usage = this["usage"] as? JsonObject ?: return null

@@ -1,18 +1,17 @@
 package com.kesepain.kemoapp.ui.screens.chat
 
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
+import android.content.Intent
 import android.net.Uri
-import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
+import androidx.core.content.FileProvider
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,31 +19,43 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -61,14 +72,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -78,12 +92,18 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -93,23 +113,39 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kesepain.kemoapp.R
+import com.kesepain.kemoapp.FilePreviewUi
 import com.kesepain.kemoapp.data.stream.ChatEntry
 import com.kesepain.kemoapp.data.stream.ChatAttachmentUi
+import com.kesepain.kemoapp.data.stream.ChatMediaUi
 import com.kesepain.kemoapp.data.stream.ChatRole
+import com.kesepain.kemoapp.data.stream.GuidanceStatus
 import com.kesepain.kemoapp.data.stream.ToolCallUi
 import com.kesepain.kemoapp.data.stream.ToolStatus
+import com.kesepain.kemoapp.ui.components.DetailBottomSheet
+import com.kesepain.kemoapp.ui.components.BackgroundPerformanceController
 import com.kesepain.kemoapp.ui.components.IllustratedEmptyState
 import com.kesepain.kemoapp.ui.components.SafeMarkdown
+import com.kesepain.kemoapp.ui.components.ChatMediaCard
+import com.kesepain.kemoapp.ui.components.warmMarkdownState
 import com.kesepain.kemoapp.ui.components.JsonRecord
 import com.kesepain.kemoapp.ui.components.records
+import com.kesepain.kemoapp.ui.screens.files.FilePreviewDialog
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -117,30 +153,43 @@ import kotlin.math.roundToInt
 fun ChatScreen(
     entries: List<ChatEntry>,
     conversations: JsonElement?,
+    status: JsonElement?,
     streaming: Boolean,
     chatClosed: Boolean,
     onLoadHistory: () -> Unit,
     onSelectConversation: (String) -> Unit,
     onDeleteConversation: (String) -> Unit,
     onDeleteAllConversations: () -> Unit,
-    onSend: (String) -> Unit,
+    onSend: (String, String) -> Unit,
     onClearConversation: () -> Unit,
-    onSaveConversation: () -> Unit,
+    onRetryLastResponse: (String) -> Unit,
     onCompressConversation: () -> Unit,
     onSaveAndNewConversation: () -> Unit,
+    onCopied: () -> Unit,
     pendingAttachments: List<ChatAttachmentUi>,
     attachmentUploading: Boolean,
+    guidanceSubmitting: Boolean,
+    chatStopping: Boolean,
     onAddAttachment: (Uri) -> Unit,
     onRemoveAttachment: (String) -> Unit,
+    onStop: () -> Unit,
+    onLoadMedia: (String, String) -> Unit,
+    onDownloadMedia: (String) -> Unit,
+    onLoadAttachment: (String) -> Unit,
+    filePreview: FilePreviewUi?,
+    filePreviewDownloading: Boolean,
+    onPreviewAttachment: (String, String, String) -> Unit,
+    onCloseFilePreview: () -> Unit,
+    onDownloadAttachment: (String) -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
+    var reasoningEffort by rememberSaveable { mutableStateOf("medium") }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val isDragged by listState.interactionSource.collectIsDraggedAsState()
     val density = LocalDensity.current
     val view = LocalView.current
-    val window = view.context.findActivity()?.window
     val bottomThresholdPx = with(density) { 48.dp.roundToPx() }
     val imeBottom = WindowInsets.ime.getBottom(density)
     var chatBottomInWindow by remember { mutableIntStateOf(0) }
@@ -148,17 +197,35 @@ fun ChatScreen(
         minOf(0, view.height - imeBottom - chatBottomInWindow)
     } else 0
     var autoFollow by rememberSaveable { mutableStateOf(true) }
-    val last = entries.lastOrNull()
+    var composerHeightPx by remember { mutableIntStateOf(0) }
+    val jumpButtonGapPx = with(density) { 10.dp.roundToPx() }
+    val showJumpToBottom by remember {
+        derivedStateOf { !autoFollow && listState.canScrollForward }
+    }
     val historyItems = conversations.records("sessions", "items", "conversations")
+    val renderItems = remember(entries, streaming) { buildChatRenderItems(entries, streaming) }
     var pendingHistory by remember { mutableStateOf<JsonRecord?>(null) }
     var pendingDelete by remember { mutableStateOf<JsonRecord?>(null) }
     var pendingDeleteAll by remember { mutableStateOf(false) }
-
-    DisposableEffect(window) {
-        val previousMode = window?.attributes?.softInputMode
-        window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
-        onDispose { if (previousMode != null) window.setSoftInputMode(previousMode) }
-    }
+    var showContextDetails by rememberSaveable { mutableStateOf(false) }
+    val statusRoot = status as? JsonObject
+    val runtimeContext = statusRoot.obj("runtime").obj("context")
+    val overviewContext = statusRoot.obj("overview").obj("context")
+    val overviewWindow = statusRoot.obj("overview").obj("context_window").obj("tokens")
+    val reportedContextPercent = runtimeContext.decimal("percent")
+        ?: overviewWindow.decimal("percent")
+        ?: 0.0
+    val contextCapacity = runtimeContext.long("max_tokens")
+        ?: overviewWindow.long("capacity_tokens")
+        ?: overviewContext.long("limit")
+        ?: 0L
+    val localTokenEstimate = entries.asReversed().firstNotNullOfOrNull { it.usage?.totalTokens } ?: 0
+    val contextPercent = reportedContextPercent.takeIf { it > 0.0 }
+        ?: if (contextCapacity > 0L) localTokenEstimate.toDouble() / contextCapacity * 100.0 else 0.0
+    val reportedRounds = runtimeContext.long("rounds") ?: overviewContext.long("rounds") ?: 0L
+    val localRounds = entries.count { it.role == ChatRole.USER && (it.text.isNotBlank() || it.attachments.isNotEmpty()) }.toLong()
+    val rounds = maxOf(reportedRounds, localRounds)
+    val roundLimit = runtimeContext.long("round_limit") ?: overviewContext.long("round_limit") ?: 0L
 
     LaunchedEffect(isDragged) {
         if (isDragged) {
@@ -172,13 +239,37 @@ fun ChatScreen(
             listState.isNearContentEnd(bottomThresholdPx)
         }.distinctUntilChanged().collect { nearBottom -> if (nearBottom) autoFollow = true }
     }
-    LaunchedEffect(entries.size, last?.text?.length, last?.reasoning?.length, last?.tools?.hashCode(), autoFollow, isDragged) {
-        if (autoFollow && !isDragged && entries.isNotEmpty()) listState.scrollToLatestContent(entries.lastIndex)
+    LaunchedEffect(renderItems.size, autoFollow, isDragged) {
+        if (autoFollow && !isDragged && entries.isNotEmpty()) {
+            withFrameNanos { }
+            listState.followLatestContent(renderItems.size)
+        }
     }
-    LaunchedEffect(streaming, autoFollow, isDragged, entries.size) {
+    LaunchedEffect(renderItems.size) {
+        withContext(Dispatchers.Default) {
+            renderItems.filterIsInstance<ChatRenderItem.AssistantMarkdown>()
+                .asSequence()
+                .filterNot { it.liveTail }
+                .forEach { warmMarkdownState(it.block) }
+        }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect(BackgroundPerformanceController::setChatScrolling)
+    }
+    DisposableEffect(listState) {
+        onDispose { BackgroundPerformanceController.setChatScrolling(false) }
+    }
+    LaunchedEffect(streaming, autoFollow, isDragged, renderItems.size) {
         while (streaming && autoFollow && !isDragged && entries.isNotEmpty()) {
-            listState.scrollToLatestContent(entries.lastIndex)
-            delay(80)
+            withFrameNanos { }
+            listState.followLatestContent(renderItems.size)
+            delay(120)
+        }
+        if (autoFollow && !isDragged && entries.isNotEmpty()) {
+            withFrameNanos { }
+            listState.followLatestContent(renderItems.size)
         }
     }
 
@@ -186,7 +277,10 @@ fun ChatScreen(
         drawerState = drawer,
         drawerContent = {
             ModalDrawerSheet(drawerShape = RectangleShape, windowInsets = WindowInsets(0, 0, 0, 0)) {
-                Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.fillMaxWidth().statusBarsPadding().padding(start = 18.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(stringResource(R.string.history), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
                     IconButton(onClick = { scope.launch { drawer.close() } }) { Icon(Icons.Default.Close, stringResource(R.string.close)) }
                     IconButton(onClick = { pendingDeleteAll = true }, enabled = historyItems.isNotEmpty()) { Icon(Icons.Default.DeleteSweep, stringResource(R.string.delete_all_history)) }
@@ -209,44 +303,144 @@ fun ChatScreen(
                 chatBottomInWindow = coordinates.boundsInWindow().bottom.roundToInt()
             },
         ) {
-            Column(Modifier.fillMaxSize()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.tab_chat), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { onLoadHistory(); scope.launch { drawer.open() } }) { Text(stringResource(R.string.history)) }
+            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f).height(48.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable { showContextDetails = true }
+                            .padding(horizontal = 4.dp, vertical = 3.dp),
+                        verticalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        Text(
+                            stringResource(R.string.chat_runtime_summary, rounds, roundLimit, contextPercent),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        ContextProgressBar(contextPercent)
+                    }
+                    ReasoningEffortPicker(
+                        value = reasoningEffort,
+                        enabled = !streaming,
+                        onValueChange = { reasoningEffort = it },
+                    )
+                    IconButton(onClick = { onLoadHistory(); scope.launch { drawer.open() } }) {
+                        Icon(Icons.Default.History, stringResource(R.string.history))
+                    }
                 }
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                )
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 92.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.Top,
                 ) {
                     if (entries.isEmpty()) item {
                         IllustratedEmptyState(stringResource(R.string.chat_greeting))
                     }
-                    items(entries, key = { it.id }) { entry ->
-                        if (entry.role == ChatRole.USER) UserBubble(entry) else AssistantBubble(entry, streaming && entry.id == entries.lastOrNull()?.id)
+                    items(
+                        items = renderItems,
+                        key = { it.key },
+                        contentType = { it.contentType },
+                    ) { item ->
+                        when (item) {
+                            is ChatRenderItem.User -> UserBubble(
+                                item.entry,
+                                onCopied,
+                                onLoadAttachment,
+                                onPreviewAttachment,
+                                onDownloadAttachment,
+                            )
+                            is ChatRenderItem.Guidance -> GuidanceBubble(
+                                item.entry,
+                                onCopied,
+                                onLoadAttachment,
+                                onPreviewAttachment,
+                                onDownloadAttachment,
+                            )
+                            is ChatRenderItem.AssistantMeta -> AssistantMetaSegment(item, streaming && item.entry.id == entries.lastOrNull()?.id, onCopied)
+                            is ChatRenderItem.AssistantMarkdown -> AssistantMarkdownSegment(item, onCopied)
+                            is ChatRenderItem.AssistantMedia -> AssistantMediaSegment(item, onLoadMedia, onDownloadMedia)
+                            is ChatRenderItem.AssistantPlaceholder -> AssistantPlaceholderSegment(item)
+                            is ChatRenderItem.AssistantFooter -> AssistantFooterSegment(item, onCopied)
+                        }
                     }
+                    item(key = "chat-end-anchor") { Spacer(Modifier.height(1.dp)) }
+                }
+            }
+            if (showJumpToBottom) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        autoFollow = true
+                        scope.launch { listState.animateScrollToItem(renderItems.size) }
+                    },
+                    modifier = Modifier.align(Alignment.BottomCenter).offset {
+                        androidx.compose.ui.unit.IntOffset(0, composerOffsetY - composerHeightPx - jumpButtonGapPx)
+                    },
+                    shape = CircleShape,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
+                    Icon(Icons.Default.ArrowDownward, stringResource(R.string.jump_to_latest))
                 }
             }
             ChatComposer(
-                modifier = Modifier.align(Alignment.BottomCenter).offset { androidx.compose.ui.unit.IntOffset(0, composerOffsetY) },
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .onSizeChanged { composerHeightPx = it.height }
+                    .offset { androidx.compose.ui.unit.IntOffset(0, composerOffsetY) },
                 text = text,
                 onTextChanged = { text = it },
                 streaming = streaming,
                 chatClosed = chatClosed,
                 onClearConversation = onClearConversation,
-                onSaveConversation = onSaveConversation,
+                onRetryLastResponse = { onRetryLastResponse(reasoningEffort) },
                 onCompressConversation = onCompressConversation,
                 onSaveAndNewConversation = onSaveAndNewConversation,
                 attachments = pendingAttachments,
                 attachmentUploading = attachmentUploading,
+                guidanceSubmitting = guidanceSubmitting,
+                chatStopping = chatStopping,
                 onAddAttachment = onAddAttachment,
                 onRemoveAttachment = onRemoveAttachment,
+                onStop = onStop,
             ) {
                 val value = text.trim()
-                if (value.isNotEmpty() || pendingAttachments.isNotEmpty()) { onSend(value); text = "" }
+                if (value.isNotEmpty() || pendingAttachments.isNotEmpty()) { onSend(value, reasoningEffort); text = "" }
             }
         }
+    }
+
+    if (showContextDetails) {
+        DetailBottomSheet(
+            title = stringResource(R.string.context_window_details),
+            onDismissRequest = { showContextDetails = false },
+        ) {
+            ContextDetailsContent(
+                root = statusRoot,
+                fallbackRounds = rounds,
+                fallbackRoundLimit = roundLimit,
+                fallbackContextPercent = contextPercent,
+                fallbackContextCapacity = contextCapacity,
+                fallbackContextUsed = localTokenEstimate.toLong(),
+            )
+        }
+    }
+    filePreview?.let { preview ->
+        FilePreviewDialog(
+            preview = preview,
+            downloading = filePreviewDownloading,
+            onDismiss = onCloseFilePreview,
+            onDownload = { onDownloadAttachment(preview.path) },
+        )
     }
 
     pendingHistory?.let { item ->
@@ -304,20 +498,9 @@ private fun LazyListState.isNearContentEnd(thresholdPx: Int): Boolean {
     return remaining <= thresholdPx
 }
 
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
-}
-
-private suspend fun LazyListState.scrollToLatestContent(lastIndex: Int) {
-    if (lastIndex < 0) return
-    if (layoutInfo.visibleItemsInfo.none { it.index == lastIndex }) scrollToItem(lastIndex)
-    repeat(3) {
-        withFrameNanos { }
-        if (!canScrollForward) return
-        scrollBy(1_000_000f)
-    }
+private suspend fun LazyListState.followLatestContent(endAnchorIndex: Int) {
+    if (endAnchorIndex < 0) return
+    scrollToItem(endAnchorIndex)
 }
 
 @Composable
@@ -325,6 +508,7 @@ private fun HistoryConversationCard(item: JsonRecord, onDelete: () -> Unit, onCl
     val title = item.text("title", "name", "summary_title").ifBlank { stringResource(R.string.untitled_conversation) }
     val summary = item.text("summary", "preview", "last_message", "description").ifBlank { stringResource(R.string.no_summary) }
     val savedAt = formatHistoryDate(item.text("updated_at", "saved_at", "closed_at", "created_at"))
+    val rounds = item.number("rounds", "session_total_rounds", "total_rounds")?.toLong() ?: 0L
     Card(
         onClick = onClick,
         shape = MaterialTheme.shapes.large,
@@ -338,7 +522,10 @@ private fun HistoryConversationCard(item: JsonRecord, onDelete: () -> Unit, onCl
                 IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.DeleteOutline, stringResource(R.string.delete_history)) }
             }
             Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)
-            if (savedAt.isNotBlank()) Text(savedAt, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.End))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.history_rounds, rounds), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (savedAt.isNotBlank()) Text(savedAt, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -354,9 +541,284 @@ private fun formatHistoryDate(value: String): String {
 }
 
 @Composable
-private fun UserBubble(entry: ChatEntry) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Surface(modifier = Modifier.fillMaxWidth(.86f), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer) {
+private fun ContextProgressBar(percent: Double, modifier: Modifier = Modifier) {
+    Box(
+        modifier.fillMaxWidth().height(5.dp).clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+    ) {
+        Box(
+            Modifier.fillMaxWidth((percent / 100.0).toFloat().coerceIn(0f, 1f))
+                .fillMaxHeight().background(MaterialTheme.colorScheme.primary),
+        )
+    }
+}
+
+private data class ContextMetricUi(val label: String, val value: String, val unit: String = "")
+
+@Composable
+private fun ContextDetailsContent(
+    root: JsonObject?,
+    fallbackRounds: Long,
+    fallbackRoundLimit: Long,
+    fallbackContextPercent: Double,
+    fallbackContextCapacity: Long,
+    fallbackContextUsed: Long,
+) {
+    val overview = root.obj("overview")
+    val runtime = root.obj("runtime")
+    val window = overview.obj("context_window")
+    val tokens = window.obj("tokens")
+    val conversation = window.obj("conversation")
+    val tasks = window.obj("tasks")
+    val capabilities = window.obj("capabilities")
+    val knowledge = window.obj("knowledge")
+    val messages = window.obj("messages")
+    val integrations = window.obj("integrations")
+    val injectionPolicy = window.obj("injection_policy")
+    val runtimeContext = runtime.obj("context")
+
+    val sessionId = runtime.text("session_id").ifBlank { overview.text("session_id") }
+    val systemTokens = tokens.long("system_prompt_tokens") ?: 0L
+    val toolTokens = tokens.long("tool_schema_tokens") ?: 0L
+    val conversationTokens = (tokens.long("conversation_tokens") ?: 0L) + (tokens.long("summary_tokens") ?: 0L)
+    val breakdownTotal = systemTokens + toolTokens + conversationTokens + (tokens.long("other_tokens") ?: 0L)
+    val reportedTotal = tokens.long("context_tokens") ?: runtimeContext.long("used_tokens") ?: 0L
+    val totalTokens = maxOf(breakdownTotal, reportedTotal).takeIf { it > 0L } ?: fallbackContextUsed
+    val capacityTokens = (tokens.long("capacity_tokens") ?: runtimeContext.long("max_tokens") ?: 0L)
+        .takeIf { it > 0L } ?: fallbackContextCapacity
+    val percent = tokens.decimal("percent") ?: runtimeContext.decimal("percent") ?: fallbackContextPercent
+
+    val foregroundRounds = conversation.long("foreground_rounds")
+        ?: runtimeContext.long("rounds")
+        ?: fallbackRounds
+    val archivedRounds = conversation.long("archived_rounds") ?: 0L
+    val sessionRounds = conversation.long("session_total_rounds")
+        ?: overview.obj("context").long("session_total_rounds")
+        ?: fallbackRounds
+    val toolCalls = conversation.long("session_tool_calls")
+        ?: conversation.long("total_tool_calls")
+        ?: 0L
+
+    if (sessionId.isNotBlank()) {
+        Text(
+            sessionId,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+
+    ContextDetailPanel(
+        title = stringResource(R.string.context_injection_policy),
+        subtitle = stringResource(R.string.context_read_only_snapshot),
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ContextInjectionBubble(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.context_perception_injection),
+                policy = contextInjectionPolicyLabel(injectionPolicy.text("perception")),
+            )
+            ContextInjectionBubble(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.context_expand_injection),
+                policy = contextInjectionPolicyLabel(injectionPolicy.text("expand")),
+            )
+        }
+    }
+
+    ContextDetailPanel(
+        title = stringResource(R.string.context_token_overview),
+        subtitle = stringResource(R.string.context_runtime_estimate),
+    ) {
+        ContextMetricGrid(
+            listOf(
+                ContextMetricUi(stringResource(R.string.context_system_prompt), formatCompactCount(systemTokens), "Token"),
+                ContextMetricUi(stringResource(R.string.context_tool_definitions), formatCompactCount(toolTokens), "Token"),
+                ContextMetricUi(stringResource(R.string.context_conversation_summary), formatCompactCount(conversationTokens), "Token"),
+                ContextMetricUi(stringResource(R.string.context_current_total), formatCompactCount(totalTokens), "Token"),
+                ContextMetricUi(stringResource(R.string.context_capacity_limit), formatCompactCount(capacityTokens), "Token"),
+            ),
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(stringResource(R.string.context_capacity), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.status_percent_value, percent), style = MaterialTheme.typography.labelLarge)
+        }
+        ContextProgressBar(percent)
+    }
+
+    ContextDetailPanel(
+        title = stringResource(R.string.context_conversation_stats),
+        subtitle = stringResource(R.string.context_foreground_archive),
+    ) {
+        ContextMetricGrid(
+            listOf(
+                ContextMetricUi(stringResource(R.string.context_foreground_rounds), foregroundRounds.toString(), stringResource(R.string.context_unit_rounds)),
+                ContextMetricUi(stringResource(R.string.context_archived_rounds), archivedRounds.toString(), stringResource(R.string.context_unit_rounds)),
+                ContextMetricUi(stringResource(R.string.context_session_total_rounds), sessionRounds.toString(), stringResource(R.string.context_unit_rounds)),
+                ContextMetricUi(stringResource(R.string.context_tool_calls), toolCalls.toString(), stringResource(R.string.context_unit_times)),
+                ContextMetricUi(stringResource(R.string.status_rounds), "$fallbackRounds / $fallbackRoundLimit"),
+            ),
+        )
+    }
+
+    ContextDetailPanel(
+        title = stringResource(R.string.context_tasks_schedule),
+        subtitle = stringResource(R.string.context_current_schedule),
+    ) {
+        ContextMetricGrid(
+            listOf(
+                ContextMetricUi(stringResource(R.string.context_active_plans), (tasks.long("active_plans") ?: 0L).toString(), stringResource(R.string.context_unit_items)),
+                ContextMetricUi(stringResource(R.string.context_waiting_crons), (tasks.long("waiting_crons") ?: 0L).toString(), stringResource(R.string.context_unit_items)),
+            ),
+        )
+    }
+
+    ContextDetailPanel(
+        title = stringResource(R.string.context_tools_agents),
+        subtitle = stringResource(R.string.context_capability_state),
+    ) {
+        ContextMetricGrid(
+            listOf(
+                ContextMetricUi(stringResource(R.string.context_enabled_tools), (capabilities.long("tools_enabled") ?: 0L).toString(), stringResource(R.string.context_unit_count)),
+                ContextMetricUi(stringResource(R.string.context_disabled_tools), (capabilities.long("tools_disabled") ?: 0L).toString(), stringResource(R.string.context_unit_count)),
+                ContextMetricUi(stringResource(R.string.context_subagents), (capabilities.long("agents_enabled") ?: 0L).toString(), stringResource(R.string.context_unit_count)),
+            ),
+        )
+    }
+
+    ContextDetailPanel(
+        title = stringResource(R.string.context_knowledge_state),
+        subtitle = stringResource(R.string.context_current_injection_scope),
+    ) {
+        ContextMetricGrid(
+            listOf(
+                ContextMetricUi(stringResource(R.string.context_enabled_knowledge), (knowledge.long("enabled") ?: 0L).toString(), stringResource(R.string.context_unit_items)),
+                ContextMetricUi(stringResource(R.string.context_disabled_knowledge), (knowledge.long("disabled") ?: 0L).toString(), stringResource(R.string.context_unit_items)),
+            ),
+        )
+    }
+
+    ContextDetailPanel(
+        title = stringResource(R.string.context_external_integrations),
+        subtitle = stringResource(R.string.context_connection_counts),
+    ) {
+        ContextMetricGrid(
+            listOf(
+                ContextMetricUi(stringResource(R.string.context_external_messages), (messages.long("connected") ?: 0L).toString(), stringResource(R.string.context_unit_count)),
+                ContextMetricUi(stringResource(R.string.context_connected_expands), (integrations.long("expands") ?: 0L).toString(), stringResource(R.string.context_unit_count)),
+                ContextMetricUi(stringResource(R.string.context_connected_senses), (integrations.long("senses") ?: 0L).toString(), stringResource(R.string.context_unit_count)),
+            ),
+        )
+    }
+}
+
+@Composable
+private fun ContextDetailPanel(
+    title: String,
+    subtitle: String,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 10.dp),
+                )
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun ContextInjectionBubble(modifier: Modifier, label: String, policy: String) {
+    Surface(modifier = modifier, shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(policy, style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.context_fixed_snapshot), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ContextMetricGrid(items: List<ContextMetricUi>) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        items.chunked(2).forEach { rowItems ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                rowItems.forEach { item ->
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(item.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text(item.value, style = MaterialTheme.typography.titleMedium)
+                                if (item.unit.isNotBlank()) {
+                                    Text(
+                                        item.unit,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun contextInjectionPolicyLabel(value: String): String = when (value.lowercase()) {
+    "round" -> stringResource(R.string.context_injection_per_round)
+    "request", "realtime" -> stringResource(R.string.context_injection_per_request)
+    "off", "disabled", "none" -> stringResource(R.string.context_injection_disabled)
+    else -> value.ifBlank { "—" }
+}
+
+private fun formatCompactCount(value: Long): String = when {
+    value >= 1_000_000L -> String.format(Locale.US, "%.1fM", value / 1_000_000.0)
+    value >= 1_000L -> String.format(Locale.US, "%.1fK", value / 1_000.0)
+    else -> value.toString()
+}
+
+@Composable
+private fun UserBubble(
+    entry: ChatEntry,
+    onCopied: () -> Unit,
+    onLoadAttachment: (String) -> Unit,
+    onPreviewAttachment: (String, String, String) -> Unit,
+    onDownloadAttachment: (String) -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    val copyText = entry.text.ifBlank { entry.attachments.joinToString("\n") { it.name } }
+    val copyMessage = {
+        if (copyText.isNotBlank()) {
+            clipboard.setText(AnnotatedString(copyText))
+            onCopied()
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.End) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(.86f).combinedClickable(onClick = {}, onLongClick = copyMessage),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.primaryContainer,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (entry.text.isNotBlank()) Text(
                     entry.text,
@@ -365,7 +827,13 @@ private fun UserBubble(entry: ChatEntry) {
                     softWrap = true,
                 )
                 entry.attachments.forEach { attachment ->
-                    Text("📎 ${attachment.name}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    ChatAttachmentContent(
+                        attachment = attachment,
+                        foregroundColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        onLoadAttachment = onLoadAttachment,
+                        onPreviewAttachment = onPreviewAttachment,
+                        onDownloadAttachment = onDownloadAttachment,
+                    )
                 }
             }
         }
@@ -373,28 +841,218 @@ private fun UserBubble(entry: ChatEntry) {
 }
 
 @Composable
-private fun AssistantBubble(entry: ChatEntry, streaming: Boolean) {
-    var reasoningExpanded by rememberSaveable(entry.id) { mutableStateOf(streaming) }
+private fun GuidanceBubble(
+    entry: ChatEntry,
+    onCopied: () -> Unit,
+    onLoadAttachment: (String) -> Unit,
+    onPreviewAttachment: (String, String, String) -> Unit,
+    onDownloadAttachment: (String) -> Unit,
+) {
     val clipboard = LocalClipboardManager.current
-    LaunchedEffect(streaming) { reasoningExpanded = streaming }
-    Surface(modifier = Modifier.fillMaxWidth(.92f), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val copyText = entry.text.ifBlank { entry.attachments.joinToString("\n") { it.name } }
+    val copyMessage = {
+        if (copyText.isNotBlank()) {
+            clipboard.setText(AnnotatedString(copyText))
+            onCopied()
+        }
+    }
+    val statusLabel = when (entry.guidanceStatus) {
+        GuidanceStatus.SUBMITTING -> stringResource(R.string.guidance_submitting)
+        GuidanceStatus.ACCEPTED -> stringResource(R.string.guidance_accepted)
+        GuidanceStatus.QUEUED -> stringResource(R.string.guidance_queued)
+        GuidanceStatus.COMPLETED -> stringResource(R.string.guidance_completed)
+        GuidanceStatus.ERROR -> stringResource(R.string.guidance_failed)
+        null -> ""
+    }
+    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.End) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(.86f).combinedClickable(onClick = {}, onLongClick = copyMessage),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.guidance_message),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (entry.guidanceStatus == GuidanceStatus.SUBMITTING) {
+                        CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.8.dp)
+                        Spacer(Modifier.size(6.dp))
+                    }
+                    if (statusLabel.isNotBlank()) {
+                        Text(statusLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                }
+                if (entry.text.isNotBlank()) {
+                    Text(entry.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+                entry.attachments.forEach { attachment ->
+                    ChatAttachmentContent(
+                        attachment = attachment,
+                        foregroundColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        onLoadAttachment = onLoadAttachment,
+                        onPreviewAttachment = onPreviewAttachment,
+                        onDownloadAttachment = onDownloadAttachment,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatAttachmentContent(
+    attachment: ChatAttachmentUi,
+    foregroundColor: Color,
+    onLoadAttachment: (String) -> Unit,
+    onPreviewAttachment: (String, String, String) -> Unit,
+    onDownloadAttachment: (String) -> Unit,
+) {
+    val mediaKind = remember(attachment.mediaKind, attachment.mimeType, attachment.name) {
+        attachmentMediaKind(attachment)
+    }
+    if (mediaKind != null) {
+        ChatMediaCard(
+            media = ChatMediaUi(
+                assetId = "upload:${attachment.path}",
+                type = mediaKind,
+                name = attachment.name,
+                path = attachment.path,
+                mimeType = attachment.mimeType,
+                size = attachment.size,
+                localUri = attachment.localUri,
+                loading = attachment.loading,
+                error = attachment.error,
+            ),
+            onLoad = { onLoadAttachment(attachment.path) },
+            onDownload = { onDownloadAttachment(attachment.path) },
+        )
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable {
+                onPreviewAttachment("upload", attachment.path, attachment.name)
+            },
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
+            border = BorderStroke(1.dp, foregroundColor.copy(alpha = 0.14f)),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.InsertDriveFile,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(21.dp),
+                )
+                Column(Modifier.weight(1f).padding(horizontal = 9.dp)) {
+                    Text(
+                        attachment.name,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        stringResource(R.string.attachment_tap_to_preview),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = stringResource(R.string.attachment_tap_to_preview),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun attachmentMediaKind(attachment: ChatAttachmentUi): String? {
+    val declaredKind = attachment.mediaKind.trim().lowercase(Locale.ROOT)
+    if (declaredKind in CHAT_ATTACHMENT_MEDIA_KINDS) return declaredKind
+
+    val mimeType = attachment.mimeType.trim().lowercase(Locale.ROOT)
+    when {
+        mimeType.startsWith("image/") -> return "image"
+        mimeType.startsWith("audio/") -> return "audio"
+        mimeType.startsWith("video/") -> return "video"
+    }
+
+    return when (attachment.name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
+        in CHAT_ATTACHMENT_IMAGE_EXTENSIONS -> "image"
+        in CHAT_ATTACHMENT_AUDIO_EXTENSIONS -> "audio"
+        in CHAT_ATTACHMENT_VIDEO_EXTENSIONS -> "video"
+        else -> null
+    }
+}
+
+private val CHAT_ATTACHMENT_MEDIA_KINDS = setOf("image", "audio", "video")
+private val CHAT_ATTACHMENT_IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "heic", "heif")
+private val CHAT_ATTACHMENT_AUDIO_EXTENSIONS = setOf("mp3", "wav", "m4a", "aac", "ogg", "oga", "flac", "opus", "amr")
+private val CHAT_ATTACHMENT_VIDEO_EXTENSIONS = setOf("mp4", "webm", "mkv", "mov", "m4v", "avi", "3gp")
+
+@Composable
+private fun AssistantMetaSegment(item: ChatRenderItem.AssistantMeta, streaming: Boolean, onCopied: () -> Unit) {
+    val entry = item.entry
+    var reasoningExpanded by rememberSaveable(entry.id) { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val copyReply = remember(entry.text, onCopied) {
+        {
+            if (entry.text.isNotBlank()) {
+                clipboard.setText(AnnotatedString(entry.text))
+                onCopied()
+            }
+        }
+    }
+    val maxReasoningContentHeight =
+        (LocalConfiguration.current.screenHeightDp.dp * 0.5f - 52.dp).coerceAtLeast(96.dp)
+    AssistantSegmentSurface(item.first, item.last, copyReply) {
+        Column(
+            Modifier.padding(
+                start = 14.dp,
+                end = 14.dp,
+                top = if (item.first) 14.dp else 2.dp,
+                bottom = if (item.last) 14.dp else 2.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             if (entry.reasoning.isNotBlank()) {
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
-                    Column {
+                    Column(Modifier.fillMaxWidth().animateContentSize()) {
                         Row(
-                            Modifier.fillMaxWidth().clickable(enabled = !streaming) { reasoningExpanded = !reasoningExpanded }.padding(horizontal = 12.dp, vertical = 9.dp),
+                            Modifier.fillMaxWidth()
+                                .clip(MaterialTheme.shapes.medium)
+                                .clickable { reasoningExpanded = !reasoningExpanded }
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(Icons.Default.Psychology, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
                             Text(stringResource(R.string.reasoning_process), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(start = 7.dp).weight(1f))
-                            Icon(if (reasoningExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, modifier = Modifier.size(18.dp))
+                            if (streaming) {
+                                CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.size(8.dp))
+                            }
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                null,
+                                modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = if (reasoningExpanded) 90f else 0f },
+                            )
                         }
-                        AnimatedVisibility(reasoningExpanded) {
+                        if (reasoningExpanded) {
                             Text(
                                 entry.reasoning,
-                                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 14.sp, lineHeight = 21.sp, fontStyle = FontStyle.Italic),
+                                modifier = Modifier.fillMaxWidth()
+                                    .heightIn(max = maxReasoningContentHeight)
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -402,40 +1060,166 @@ private fun AssistantBubble(entry: ChatEntry, streaming: Boolean) {
                 }
             }
             entry.tools.forEach { ToolCallCard(it) }
-            if (entry.text.isNotBlank()) {
-                if (entry.reasoning.isNotBlank() || entry.tools.isNotEmpty()) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SafeMarkdown(entry.text, streaming = streaming, modifier = Modifier.fillMaxWidth())
-            } else if (streaming && entry.reasoning.isBlank() && entry.tools.isEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text(stringResource(R.string.streaming), modifier = Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodySmall)
-                }
+            if (item.dividerAfter) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+    }
+}
+
+@Composable
+private fun AssistantMarkdownSegment(item: ChatRenderItem.AssistantMarkdown, onCopied: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    val copyReply = remember(item.fullText, onCopied) {
+        {
+            if (item.fullText.isNotBlank()) {
+                clipboard.setText(AnnotatedString(item.fullText))
+                onCopied()
             }
-            if (!streaming && entry.text.isNotBlank()) {
+        }
+    }
+    AssistantSegmentSurface(item.first, item.last, copyReply) {
+        Box(
+            Modifier.padding(
+                start = 14.dp,
+                end = 14.dp,
+                top = if (item.first) 14.dp else 2.dp,
+                bottom = if (item.last) 14.dp else 2.dp,
+            ),
+        ) {
+            if (item.liveTail) {
+                Text(
+                    item.block,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp, lineHeight = 24.sp),
+                    softWrap = true,
+                )
+            } else {
+                SafeMarkdown(item.block, streaming = false, modifier = Modifier.fillMaxWidth(), onCopied = onCopied)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssistantMediaSegment(
+    item: ChatRenderItem.AssistantMedia,
+    onLoadMedia: (String, String) -> Unit,
+    onDownloadMedia: (String) -> Unit,
+) {
+    AssistantSegmentSurface(item.first, item.last, onLongCopy = {}) {
+        Column(
+            Modifier.padding(
+                start = 14.dp,
+                end = 14.dp,
+                top = if (item.first) 14.dp else 2.dp,
+                bottom = if (item.last) 14.dp else 6.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(stringResource(R.string.generated_media), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ChatMediaCard(
+                media = item.media,
+                onLoad = { onLoadMedia(item.media.assetId, item.media.path) },
+                onDownload = { onDownloadMedia(item.media.path) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AssistantPlaceholderSegment(item: ChatRenderItem.AssistantPlaceholder) {
+    AssistantSegmentSurface(item.first, item.last, onLongCopy = {}) {
+        Row(
+            Modifier.padding(
+                start = 14.dp,
+                end = 14.dp,
+                top = if (item.first) 14.dp else 2.dp,
+                bottom = if (item.last) 14.dp else 2.dp,
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Text(stringResource(R.string.streaming), modifier = Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun AssistantFooterSegment(item: ChatRenderItem.AssistantFooter, onCopied: () -> Unit) {
+    val entry = item.entry
+    var copied by rememberSaveable(entry.id) { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val copyReply = {
+        if (entry.text.isNotBlank()) {
+            clipboard.setText(AnnotatedString(entry.text))
+            copied = true
+            onCopied()
+        }
+    }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1_500)
+            copied = false
+        }
+    }
+    AssistantSegmentSurface(item.first, item.last, copyReply) {
+        Column(
+            Modifier.padding(
+                start = 14.dp,
+                end = 10.dp,
+                top = if (item.first) 14.dp else 2.dp,
+                bottom = 8.dp,
+            ),
+        ) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 entry.usage?.let { usage ->
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(R.string.usage_tokens, usage.totalTokens), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            stringResource(R.string.usage_cache, String.format(Locale.US, "%.1f%%", usage.cacheHitRate * 100.0)),
-                            modifier = Modifier.padding(start = 10.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            stringResource(R.string.usage_elapsed, formatElapsed(usage.elapsedMs)),
-                            modifier = Modifier.padding(start = 10.dp).weight(1f),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        IconButton(onClick = { clipboard.setText(AnnotatedString(entry.text)) }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.ContentCopy, stringResource(R.string.copy_reply), modifier = Modifier.size(17.dp))
-                        }
-                    }
+                    Text(stringResource(R.string.usage_tokens, usage.totalTokens), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.usage_cache, String.format(Locale.US, "%.1f%%", usage.cacheHitRate * 100.0)),
+                        modifier = Modifier.padding(start = 10.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        stringResource(R.string.usage_elapsed, formatElapsed(usage.elapsedMs)),
+                        modifier = Modifier.padding(start = 10.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = copyReply, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        if (copied) Icons.Default.CheckCircle else Icons.Default.ContentCopy,
+                        stringResource(if (copied) R.string.feedback_copied else R.string.copy_reply),
+                        modifier = Modifier.size(17.dp),
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun AssistantSegmentSurface(
+    first: Boolean,
+    last: Boolean,
+    onLongCopy: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(
+        topStart = if (first) 28.dp else 0.dp,
+        topEnd = if (first) 28.dp else 0.dp,
+        bottomStart = if (last) 28.dp else 0.dp,
+        bottomEnd = if (last) 28.dp else 0.dp,
+    )
+    Surface(
+        modifier = Modifier.fillMaxWidth(.92f)
+            .padding(bottom = if (last) 10.dp else 0.dp)
+            .combinedClickable(onClick = {}, onLongClick = onLongCopy),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) { content() }
 }
 
 private fun formatElapsed(milliseconds: Long): String = when {
@@ -447,15 +1231,30 @@ private fun formatElapsed(milliseconds: Long): String = when {
 @Composable
 private fun ToolCallCard(tool: ToolCallUi) {
     var expanded by rememberSaveable(tool.callId) { mutableStateOf(false) }
+    var nowMs by remember(tool.callId) { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(tool.status, tool.startedAtMs) {
+        while (tool.status == ToolStatus.RUNNING) {
+            nowMs = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    val elapsedMs = if (tool.status == ToolStatus.RUNNING) {
+        (nowMs - tool.startedAtMs).coerceAtLeast(0)
+    } else tool.elapsedMs.coerceAtLeast(0)
     val showResult = tool.status != ToolStatus.RUNNING && tool.resultPreview.isNotBlank()
+    val maxToolContentHeight =
+        (LocalConfiguration.current.screenHeightDp.dp * 0.25f - 52.dp).coerceAtLeast(72.dp)
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().animateContentSize()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -465,23 +1264,38 @@ private fun ToolCallCard(tool: ToolCallUi) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (elapsedMs > 0 || tool.status == ToolStatus.RUNNING) {
+                    Text(
+                        stringResource(R.string.tool_elapsed, formatElapsed(elapsedMs)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
                 when (tool.status) {
                     ToolStatus.RUNNING -> CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
                     ToolStatus.SUCCESS -> Icon(Icons.Default.CheckCircle, stringResource(R.string.tool_success), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                     ToolStatus.FAILED -> Icon(Icons.Outlined.ErrorOutline, stringResource(R.string.tool_failed), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                 }
+                Spacer(Modifier.size(8.dp))
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    null,
+                    modifier = Modifier.size(18.dp).graphicsLayer {
+                        rotationZ = if (expanded) 90f else 0f
+                    },
+                )
             }
-            AnimatedVisibility(visible = expanded) {
+            if (expanded) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                        .heightIn(max = maxToolContentHeight)
+                        .verticalScroll(rememberScrollState())
+                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
-                    if (tool.arguments.isNotBlank()) {
-                        ToolDetailBlock(stringResource(R.string.tool_arguments), tool.arguments)
-                    }
-                    if (showResult) {
-                        ToolDetailBlock(stringResource(R.string.tool_result), tool.resultPreview)
-                    }
+                    if (tool.arguments.isNotBlank()) ToolDetailBlock(stringResource(R.string.tool_arguments), tool.arguments)
+                    if (showResult) ToolDetailBlock(stringResource(R.string.tool_result), tool.resultPreview)
                 }
             }
         }
@@ -501,6 +1315,31 @@ private fun ToolDetailBlock(label: String, value: String) {
 }
 
 @Composable
+private fun ReasoningEffortPicker(
+    value: String,
+    enabled: Boolean,
+    onValueChange: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        InputChip(
+            selected = true,
+            onClick = { expanded = true },
+            enabled = enabled,
+            label = { Text(value) },
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            listOf("minimal", "low", "medium", "high", "max").forEach { effort ->
+                DropdownMenuItem(
+                    text = { Text(effort) },
+                    onClick = { expanded = false; onValueChange(effort) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ChatComposer(
     modifier: Modifier = Modifier,
     text: String,
@@ -508,60 +1347,201 @@ private fun ChatComposer(
     streaming: Boolean,
     chatClosed: Boolean,
     onClearConversation: () -> Unit,
-    onSaveConversation: () -> Unit,
+    onRetryLastResponse: () -> Unit,
     onCompressConversation: () -> Unit,
     onSaveAndNewConversation: () -> Unit,
     attachments: List<ChatAttachmentUi>,
     attachmentUploading: Boolean,
+    guidanceSubmitting: Boolean,
+    chatStopping: Boolean,
     onAddAttachment: (Uri) -> Unit,
     onRemoveAttachment: (String) -> Unit,
+    onStop: () -> Unit,
     onSend: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) onAddAttachment(uri) }
+    var attachmentMenuExpanded by remember { mutableStateOf(false) }
+    var pendingCameraUri by rememberSaveable { mutableStateOf("") }
+    val context = LocalContext.current
+    val inputScrollState = rememberScrollState()
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            onAddAttachment(uri)
+        }
+    }
+    val galleryPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) onAddAttachment(uri)
+    }
+    val cameraPicker = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        val value = pendingCameraUri
+        pendingCameraUri = ""
+        if (saved && value.isNotBlank()) onAddAttachment(Uri.parse(value))
+    }
+    val hasInput = text.isNotBlank() || attachments.isNotEmpty()
+    LaunchedEffect(text) {
+        inputScrollState.scrollTo(inputScrollState.maxValue)
+    }
     Column(modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (streaming) {
+            Text(
+                stringResource(R.string.guidance_running_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
         if (attachments.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                attachments.forEach { attachment ->
-                    InputChip(
-                        selected = false,
-                        onClick = { onRemoveAttachment(attachment.path) },
-                        label = { Text(attachment.name, maxLines = 1) },
-                        trailingIcon = { Icon(Icons.Default.Close, stringResource(R.string.remove_attachment), Modifier.size(16.dp)) },
-                    )
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 164.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                attachments.chunked(2).forEach { rowAttachments ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        rowAttachments.forEach { attachment ->
+                            InputChip(
+                                selected = false,
+                                onClick = { onRemoveAttachment(attachment.path) },
+                                modifier = Modifier.weight(1f),
+                                label = {
+                                    Text(
+                                        attachment.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                trailingIcon = {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        stringResource(R.string.remove_attachment),
+                                        Modifier.size(16.dp),
+                                    )
+                                },
+                            )
+                        }
+                        if (rowAttachments.size == 1) Spacer(Modifier.weight(1f))
+                    }
                 }
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f).height(56.dp).background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.extraLarge), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = !streaming && !attachmentUploading) {
-                    if (attachmentUploading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    else Icon(Icons.Default.AttachFile, stringResource(R.string.add_attachment))
+            Row(
+                Modifier.weight(1f)
+                    .heightIn(min = 56.dp, max = 280.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.extraLarge),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box {
+                    IconButton(onClick = { attachmentMenuExpanded = true }, enabled = !attachmentUploading) {
+                        if (attachmentUploading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Default.AttachFile, stringResource(R.string.add_attachment))
+                    }
+                    DropdownMenu(expanded = attachmentMenuExpanded, onDismissRequest = { attachmentMenuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.take_photo)) },
+                            leadingIcon = { Icon(Icons.Default.CameraAlt, null) },
+                            onClick = {
+                                attachmentMenuExpanded = false
+                                val uri = createCameraImageUri(context)
+                                pendingCameraUri = uri.toString()
+                                cameraPicker.launch(uri)
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.choose_gallery)) },
+                            leadingIcon = { Icon(Icons.Default.PhotoLibrary, null) },
+                            onClick = {
+                                attachmentMenuExpanded = false
+                                galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.choose_file)) },
+                            leadingIcon = { Icon(Icons.Default.FolderOpen, null) },
+                            onClick = {
+                                attachmentMenuExpanded = false
+                                filePicker.launch(arrayOf("*/*"))
+                            },
+                        )
+                    }
                 }
                 BasicTextField(
                     value = text,
                     onValueChange = onTextChanged,
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                        .heightIn(min = 56.dp, max = 280.dp)
+                        .verticalScroll(inputScrollState),
+                    singleLine = false,
+                    minLines = 1,
+                    maxLines = Int.MAX_VALUE,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    decorationBox = { inner -> Box(contentAlignment = Alignment.CenterStart) { if (text.isBlank()) Text(stringResource(R.string.chat_hint), color = MaterialTheme.colorScheme.onSurfaceVariant); inner() } },
+                    decorationBox = { inner ->
+                        Box(
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 12.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            if (text.isBlank()) Text(stringResource(R.string.chat_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            inner()
+                        }
+                    },
                 )
-                Box {
-                    IconButton(onClick = { menuExpanded = true }, enabled = !streaming) { Icon(Icons.Default.MoreVert, stringResource(R.string.quick_actions)) }
-                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.clear_conversation)) }, onClick = { menuExpanded = false; onClearConversation() })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.save_conversation)) }, onClick = { menuExpanded = false; onSaveConversation() })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.compress_context)) }, onClick = { menuExpanded = false; onCompressConversation() })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.save_and_new)) }, onClick = { menuExpanded = false; onSaveAndNewConversation() })
+                if (streaming) {
+                    IconButton(
+                        onClick = onSend,
+                        enabled = hasInput && !attachmentUploading && !guidanceSubmitting && !chatStopping,
+                    ) {
+                        if (guidanceSubmitting) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.send_guidance), tint = MaterialTheme.colorScheme.tertiary)
+                    }
+                } else {
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, stringResource(R.string.quick_actions)) }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.clear_conversation)) }, onClick = { menuExpanded = false; onClearConversation() })
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.regenerate_response)) },
+                                onClick = { menuExpanded = false; onRetryLastResponse() },
+                                enabled = !chatClosed,
+                            )
+                            DropdownMenuItem(text = { Text(stringResource(R.string.compress_context)) }, onClick = { menuExpanded = false; onCompressConversation() })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.save_and_new)) }, onClick = { menuExpanded = false; onSaveAndNewConversation() })
+                        }
                     }
                 }
             }
             IconButton(
-                onClick = onSend,
-                enabled = !streaming && !chatClosed && !attachmentUploading,
-                modifier = Modifier.padding(start = 8.dp).background(MaterialTheme.colorScheme.primary, MaterialTheme.shapes.medium),
-            ) { Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.send), tint = MaterialTheme.colorScheme.onPrimary) }
+                onClick = if (streaming) onStop else onSend,
+                enabled = if (streaming) !chatStopping else !chatClosed && !attachmentUploading && hasInput,
+                modifier = Modifier.padding(start = 8.dp).background(
+                    if (streaming) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
+                    MaterialTheme.shapes.medium,
+                ),
+            ) {
+                if (streaming && chatStopping) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onErrorContainer)
+                } else {
+                    Icon(
+                        if (streaming) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
+                        stringResource(if (streaming) R.string.stop_generation else R.string.send),
+                        tint = if (streaming) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
         }
     }
 }
+
+private fun createCameraImageUri(context: Context): Uri {
+    val directory = File(context.cacheDir, "chat-captures").apply { mkdirs() }
+    val file = File(directory, "camera-${System.currentTimeMillis()}.jpg")
+    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+}
+
+private fun JsonObject?.obj(key: String): JsonObject? = this?.get(key) as? JsonObject
+private fun JsonObject?.text(key: String): String = (this?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
+private fun JsonObject?.decimal(key: String): Double? = (this?.get(key) as? JsonPrimitive)?.doubleOrNull
+private fun JsonObject?.long(key: String): Long? = (this?.get(key) as? JsonPrimitive)?.longOrNull
