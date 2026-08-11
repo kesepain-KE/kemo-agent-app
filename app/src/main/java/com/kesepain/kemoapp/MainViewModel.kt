@@ -147,6 +147,43 @@ private data class PendingNextTurnGuidance(
     val reasoningEffort: String,
 )
 
+private data class ConversationTarget(
+    val sessionId: String,
+    val state: String,
+    val rounds: Int,
+)
+
+private data class AccountRequestContext(
+    val accountId: String,
+    val epoch: Long,
+)
+
+private fun conversationTarget(payload: JsonElement): ConversationTarget? {
+    val session = (payload as? JsonObject)?.get("session") as? JsonObject ?: return null
+    val sessionId = (session["session_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    if (sessionId.isBlank()) return null
+    return ConversationTarget(
+        sessionId = sessionId,
+        state = (session["state"] as? JsonPrimitive)?.contentOrNull.orEmpty().ifBlank { "open" },
+        rounds = (session["rounds"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.coerceAtLeast(0) ?: 0,
+    )
+}
+
+private fun latestOpenConversationTarget(payload: JsonElement): ConversationTarget? {
+    val sessions = (payload as? JsonObject)?.get("sessions") as? JsonArray ?: return null
+    return sessions.asSequence().mapNotNull { value ->
+        val session = value as? JsonObject ?: return@mapNotNull null
+        val sessionId = (session["session_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val state = (session["state"] as? JsonPrimitive)?.contentOrNull.orEmpty().ifBlank { "open" }
+        if (sessionId.isBlank() || state.equals("closed", ignoreCase = true)) return@mapNotNull null
+        ConversationTarget(
+            sessionId = sessionId,
+            state = state,
+            rounds = (session["rounds"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.coerceAtLeast(0) ?: 0,
+        )
+    }.firstOrNull()
+}
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = Prefs(application)
     private val secure = SecureStore(application)
@@ -166,7 +203,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pendingKeys: StateFlow<Set<String>> = _pendingKeys.asStateFlow()
     val appAbout: StateFlow<AppAboutUiState> = _appAbout.asStateFlow()
     private var eventSocket: EventSocket? = null
-    private var chatRestored = false
+    private var observedAccountId: String? = null
+    private var accountEpoch = 0L
+    private var accountRestoreJob: Job? = null
     private var chatJob: Job? = null
     private var persistChatJob: Job? = null
     private var pendingNextTurnGuidance: PendingNextTurnGuidance? = null
@@ -179,9 +218,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val credentials = account?.let { repo.credentialState(it.id) }
                 val configured = credentials?.sessionToken?.isNotBlank() == true && credentials.deviceToken.isNotBlank()
                 val hasSavedAccounts = values.accounts.isNotEmpty()
+                val accountId = account?.id.orEmpty()
+                val accountChanged = observedAccountId != accountId
+                if (accountChanged) {
+                    observedAccountId = accountId
+                    accountEpoch += 1L
+                    accountRestoreJob?.cancel()
+                }
                 _state.update { current ->
-                    if (!chatRestored) {
-                        chatRestored = true
+                    if (accountChanged) {
                         val restored = runCatching {
                             ApiClient.json.decodeFromString<List<ChatEntry>>(values.chatHistoryJson)
                         }.getOrDefault(emptyList()).takeLast(100)
@@ -193,6 +238,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             chatSessionId = values.chatSessionId.ifBlank { "app-${UUID.randomUUID()}" },
                             chatClosed = false,
                             streaming = false,
+                            activeRunId = "",
+                            guidanceSubmitting = false,
+                            chatStopping = false,
+                            pendingChatAttachments = emptyList(),
+                            chatAttachmentUploading = false,
+                            conversations = null,
+                            tasks = null,
+                            cron = null,
+                            status = null,
+                            expands = null,
+                            senses = null,
+                            uploadFiles = null,
+                            generatedFiles = null,
+                            knowledge = null,
+                            models = null,
+                            agentConfig = null,
+                            avatarBytes = null,
+                            versions = null,
+                            filePreview = null,
+                            error = "",
                             rememberedDeviceToken = credentials?.deviceToken.takeIf { credentials?.rememberCredentials == true }.orEmpty(),
                             rememberedUserPassword = credentials?.userPassword.orEmpty(),
                             rememberCredentials = credentials?.rememberCredentials == true,
@@ -206,7 +271,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         rememberCredentials = credentials?.rememberCredentials == true,
                     )
                 }
-                if (values.chatSessionId.isBlank() && _state.value.chatSessionId.isNotBlank()) persistChatNow()
+                if (accountChanged && account != null && configured) {
+                    val expectedEpoch = accountEpoch
+                    accountRestoreJob = viewModelScope.launch {
+                        restoreAccountChat(account.id, expectedEpoch)
+                    }
+                }
+                if (values.chatSessionId.isBlank() && _state.value.chatSessionId.isNotBlank()) {
+                    persistChatNow(accountId)
+                }
                 if (account != null && secure.get(account.id, SecureStore.APP_PASSWORD_HASH).isNotBlank()) {
                     // Security is configured; remain locked until explicit authentication.
                 } else if (hasSavedAccounts) {
@@ -250,6 +323,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     error = "",
                 )
             }
+            restoreAccountChat(connectedAccount.id, accountEpoch)
             loadDashboard()
         }
     }
@@ -267,7 +341,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun sendChat(prompt: String, reasoningEffort: String) {
         val snapshot = _state.value
         val pendingAttachments = snapshot.pendingChatAttachments
-        if ((prompt.isBlank() && pendingAttachments.isEmpty()) || snapshot.chatAttachmentUploading) return
+        if (!snapshot.configured || (prompt.isBlank() && pendingAttachments.isEmpty()) || snapshot.chatAttachmentUploading) return
         if (snapshot.streaming) {
             submitGuidance(prompt, reasoningEffort, pendingAttachments)
         } else if (!snapshot.chatClosed) {
@@ -761,7 +835,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun switchConversation(sessionId: String) = launchBusy {
         require(sessionId.isNotBlank()) { "会话标识为空" }
         val payload = repo.conversationMessages(sessionId)
-        val entries = parseHistoryMessages(payload)
+        val entries = parseHistoryMessages(payload, sessionId)
         _state.update { it.copy(chatEntries = entries.takeLast(100), chatSessionId = sessionId, chatClosed = true, status = null, error = "") }
         loadStatusInternal()
         persistChatNow()
@@ -807,9 +881,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadModels() = launchBusy("refresh:models") { loadValue({ repo.models() }) { value -> copy(models = value) } }
     fun loadAgentConfig() = launchBusy("refresh:config") { loadValue({ repo.config() }) { value -> copy(agentConfig = value) } }
     fun loadProfileData() = viewModelScope.launch {
+        val requestContext = accountRequestContext()
         runCatching { repo.avatar() to repo.version() }
-            .onSuccess { values -> _state.update { it.copy(avatarBytes = values.first, versions = values.second, error = "") } }
-            .onFailure { failure -> _state.update { it.copy(error = getApplication<Application>().getString(R.string.error_generic)) } }
+            .onSuccess { values ->
+                if (isCurrentAccountRequest(requestContext)) {
+                    _state.update { it.copy(avatarBytes = values.first, versions = values.second, error = "") }
+                }
+            }
+            .onFailure {
+                if (isCurrentAccountRequest(requestContext)) {
+                    _state.update { it.copy(error = getApplication<Application>().getString(R.string.error_generic)) }
+                }
+            }
     }
 
     fun loadAppAbout() {
@@ -818,6 +901,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val avatar = runCatching { appUpdateRepository.loadGitHubAvatar() }.getOrNull()
             _appAbout.update { it.copy(avatarBytes = avatar, avatarLoading = false) }
+        }
+    }
+
+    private suspend fun restoreAccountChat(accountId: String, expectedEpoch: Long) {
+        if (accountId.isBlank()) return
+        val clientId = "app_$deviceId".take(128)
+        val target = runCatching {
+            conversationTarget(repo.activeConversation(clientId))
+        }.getOrNull() ?: runCatching {
+            latestOpenConversationTarget(repo.conversations(limit = 1))
+        }.getOrNull() ?: ConversationTarget(
+            sessionId = "app-${UUID.randomUUID()}",
+            state = "open",
+            rounds = 0,
+        )
+        if (target.sessionId.isBlank()) return
+        val entries = if (target.rounds > 0) {
+            runCatching {
+                parseHistoryMessages(repo.conversationMessages(target.sessionId), target.sessionId)
+            }.getOrNull()
+        } else {
+            emptyList()
+        }
+        if (_state.value.preferences.currentAccountId != accountId || accountEpoch != expectedEpoch) return
+        val restoredEntries = entries ?: if (_state.value.preferences.chatSessionId == target.sessionId) {
+            runCatching {
+                ApiClient.json.decodeFromString<List<ChatEntry>>(_state.value.preferences.chatHistoryJson)
+            }.getOrDefault(emptyList()).takeLast(100)
+        } else {
+            emptyList()
+        }
+        _state.update { current ->
+            if (current.preferences.currentAccountId != accountId || accountEpoch != expectedEpoch) current
+            else current.copy(
+                chatEntries = restoredEntries.takeLast(100),
+                chatSessionId = target.sessionId,
+                chatClosed = target.state.equals("closed", ignoreCase = true),
+                streaming = false,
+                activeRunId = "",
+                guidanceSubmitting = false,
+                chatStopping = false,
+                status = null,
+                error = "",
+            )
+        }
+        persistChatNow(accountId)
+        loadStatusForAccount(accountId, target.sessionId, expectedEpoch)
+        loadConversationsForAccount(accountId, expectedEpoch)
+    }
+
+    private suspend fun loadStatusForAccount(accountId: String, sessionId: String, expectedEpoch: Long) {
+        runCatching { repo.status(sessionId) }.onSuccess { value ->
+            if (_state.value.preferences.currentAccountId == accountId && accountEpoch == expectedEpoch) {
+                _state.update { it.copy(status = value, error = "") }
+            }
+        }
+    }
+
+    private suspend fun loadConversationsForAccount(accountId: String, expectedEpoch: Long) {
+        runCatching { repo.conversations() }.onSuccess { value ->
+            if (_state.value.preferences.currentAccountId == accountId && accountEpoch == expectedEpoch) {
+                _state.update { it.copy(conversations = value, error = "") }
+            }
         }
     }
 
@@ -1011,12 +1157,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun switchAccount(id: String) {
+    fun switchAccount(id: String): Boolean {
+        val snapshot = _state.value
+        if (id.isBlank() || snapshot.preferences.currentAccountId == id) return false
+        if (snapshot.streaming || snapshot.busy || snapshot.chatAttachmentUploading || snapshot.guidanceSubmitting) {
+            emitMessage(R.string.feedback_account_switch_busy, UiMessageType.Info)
+            return false
+        }
+        val outgoingAccountId = snapshot.preferences.currentAccountId
+        val outgoingHistory = ApiClient.json.encodeToString(snapshot.chatEntries.takeLast(100))
+        val outgoingSessionId = snapshot.chatSessionId
+        persistChatJob?.cancel()
+        accountRestoreJob?.cancel()
+        pendingNextTurnGuidance = null
+        accountEpoch += 1L
+        _state.update { current ->
+            current.copy(
+                configured = false,
+                chatEntries = emptyList(),
+                chatSessionId = "",
+                chatClosed = false,
+                streaming = false,
+                conversations = null,
+                tasks = null,
+                cron = null,
+                status = null,
+                expands = null,
+                senses = null,
+                uploadFiles = null,
+                generatedFiles = null,
+                knowledge = null,
+                models = null,
+                agentConfig = null,
+                avatarBytes = null,
+                versions = null,
+                filePreview = null,
+                pendingChatAttachments = emptyList(),
+                activeRunId = "",
+                chatStopping = false,
+                error = "",
+            )
+        }
         viewModelScope.launch {
-            prefs.setCurrentAccount(id)
+            if (outgoingAccountId.isNotBlank() && outgoingSessionId.isNotBlank()) {
+                prefs.saveChatState(outgoingAccountId, outgoingHistory, outgoingSessionId)
+            }
             eventSocket?.stop()
+            prefs.setCurrentAccount(id)
             unlockManager.lock()
         }
+        return true
     }
 
     fun logout() {
@@ -1116,33 +1306,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearError() = _state.update { it.copy(error = "") }
 
     private suspend fun loadTasksInternal() {
+        val requestContext = accountRequestContext()
         runCatching {
             val plans = repo.taskPlans()
             val crons = repo.cron()
             repo.updateWidgetSummary()
-            _state.update { it.copy(tasks = plans, cron = crons, error = "") }
-        }.onFailure { _state.update { state -> state.copy(error = getApplication<Application>().getString(R.string.error_generic)) } }
+            if (isCurrentAccountRequest(requestContext)) {
+                _state.update { it.copy(tasks = plans, cron = crons, error = "") }
+            }
+        }.onFailure {
+            if (isCurrentAccountRequest(requestContext)) {
+                _state.update { state -> state.copy(error = getApplication<Application>().getString(R.string.error_generic)) }
+            }
+        }
     }
 
     private suspend fun loadStatusInternal() = loadValue({ repo.status(_state.value.chatSessionId) }) { value -> copy(status = value) }
     private suspend fun loadConversationsInternal() = loadValue({ repo.conversations() }) { value -> copy(conversations = value) }
     private suspend fun loadModulesInternal() {
+        val requestContext = accountRequestContext()
         runCatching { repo.expandsData() to repo.senses() }
-            .onSuccess { values -> _state.update { it.copy(expands = values.first, senses = values.second, error = "") } }
-            .onFailure { failure -> _state.update { it.copy(error = getApplication<Application>().getString(R.string.error_generic)) } }
+            .onSuccess { values ->
+                if (isCurrentAccountRequest(requestContext)) {
+                    _state.update { it.copy(expands = values.first, senses = values.second, error = "") }
+                }
+            }
+            .onFailure {
+                if (isCurrentAccountRequest(requestContext)) {
+                    _state.update { it.copy(error = getApplication<Application>().getString(R.string.error_generic)) }
+                }
+            }
     }
 
     private suspend fun loadFileDirectory(scope: String, path: String, page: Int = 1) {
+        val requestContext = accountRequestContext()
         val normalizedScope = scope.lowercase()
         require(normalizedScope == "upload" || normalizedScope == "download") { "unsupported file scope" }
         runCatching { repo.files(normalizedScope, path, page) }
             .onSuccess { value ->
-                _state.update {
-                    if (normalizedScope == "upload") it.copy(uploadFiles = value, error = "")
-                    else it.copy(generatedFiles = value, error = "")
+                if (isCurrentAccountRequest(requestContext)) {
+                    _state.update {
+                        if (normalizedScope == "upload") it.copy(uploadFiles = value, error = "")
+                        else it.copy(generatedFiles = value, error = "")
+                    }
                 }
             }
-            .onFailure { failure -> _state.update { it.copy(error = getApplication<Application>().getString(R.string.error_generic)) } }
+            .onFailure {
+                if (isCurrentAccountRequest(requestContext)) {
+                    _state.update { it.copy(error = getApplication<Application>().getString(R.string.error_generic)) }
+                }
+            }
     }
 
     private fun scheduleChatPersist() {
@@ -1153,17 +1366,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun persistChatNow() {
+    private suspend fun persistChatNow(accountId: String = _state.value.preferences.currentAccountId) {
         val snapshot = _state.value
-        if (snapshot.chatSessionId.isBlank()) return
-        prefs.saveChatState(ApiClient.json.encodeToString(snapshot.chatEntries.takeLast(100)), snapshot.chatSessionId)
+        if (accountId.isBlank() || snapshot.chatSessionId.isBlank()) return
+        prefs.saveChatState(
+            accountId,
+            ApiClient.json.encodeToString(snapshot.chatEntries.takeLast(100)),
+            snapshot.chatSessionId,
+        )
     }
 
     private suspend fun loadValue(block: suspend () -> JsonElement, reducer: AppUiState.(JsonElement) -> AppUiState) {
+        val requestContext = accountRequestContext()
         runCatching { block() }
-            .onSuccess { value -> _state.update { it.reducer(value).copy(error = "") } }
-            .onFailure { failure -> _state.update { it.copy(error = getApplication<Application>().getString(R.string.error_generic)) } }
+            .onSuccess { value ->
+                if (isCurrentAccountRequest(requestContext)) {
+                    _state.update { it.reducer(value).copy(error = "") }
+                }
+            }
+            .onFailure {
+                if (isCurrentAccountRequest(requestContext)) {
+                    _state.update { it.copy(error = getApplication<Application>().getString(R.string.error_generic)) }
+                }
+            }
     }
+
+    private fun accountRequestContext(): AccountRequestContext = AccountRequestContext(
+        accountId = _state.value.preferences.currentAccountId,
+        epoch = accountEpoch,
+    )
+
+    private fun isCurrentAccountRequest(value: AccountRequestContext): Boolean =
+        value.accountId == _state.value.preferences.currentAccountId && value.epoch == accountEpoch
 
     private fun launchBusy(block: suspend () -> Unit) =
         launchBusyInternal(
@@ -1253,7 +1487,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             deviceToken = secrets.deviceToken,
             sessionToken = secrets.sessionToken,
             deviceId = deviceId,
-            onEvent = ::onEvent,
+            onEvent = { event ->
+                if (_state.value.preferences.currentAccountId == account.id) onEvent(event)
+            },
         ).also { it.start() }
     }
 
@@ -1355,7 +1591,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() { eventSocket?.stop(); super.onCleared() }
 
-    private fun parseHistoryMessages(payload: JsonElement): List<ChatEntry> {
+    private fun parseHistoryMessages(payload: JsonElement, sessionId: String): List<ChatEntry> {
         val root = payload as? JsonObject
         val messages = when (payload) {
             is JsonArray -> payload
@@ -1418,7 +1654,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     round += 1
                     val inputAttachments = (item["attachments"] as? JsonArray).orEmpty().mapNotNull(::attachment)
                     if (text.isNotBlank() || inputAttachments.isNotEmpty()) {
-                        add(ChatEntry("history-${_state.value.chatSessionId}-$index", ChatRole.USER, text = text, attachments = inputAttachments))
+                        add(ChatEntry("history-$sessionId-$index", ChatRole.USER, text = text, attachments = inputAttachments))
                     }
                     return@forEachIndexed
                 }
@@ -1461,7 +1697,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (text.isNotBlank() || trace?.string("reasoning").orEmpty().isNotBlank() || tools.isNotEmpty() || media.isNotEmpty()) {
                     add(
                         ChatEntry(
-                            id = "history-${_state.value.chatSessionId}-$index",
+                            id = "history-$sessionId-$index",
                             role = ChatRole.ASSISTANT,
                             text = text,
                             reasoning = trace?.string("reasoning").orEmpty(),
