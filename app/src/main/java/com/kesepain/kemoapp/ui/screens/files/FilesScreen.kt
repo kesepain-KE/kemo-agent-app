@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.FilePreviewUi
 import com.kesepain.kemoapp.ui.components.IllustratedEmptyState
+import com.kesepain.kemoapp.ui.components.JsonRecord
 import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 import com.kesepain.kemoapp.ui.components.SectionHeader
 import com.kesepain.kemoapp.ui.components.records
@@ -70,8 +71,8 @@ fun FilesScreen(
     onClosePreview: () -> Unit,
 ) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
-    val uploadFiles = uploadValue.records("items", "files", "entries")
-    val generatedFiles = generatedValue.records("items", "files", "entries")
+    val uploadFiles = uploadValue.records("items", "files", "entries").filter(JsonRecord::isDisplayableFile)
+    val generatedFiles = generatedValue.records("items", "files", "entries").filter(JsonRecord::isDisplayableFile)
     val files = if (selected == 0) uploadFiles else generatedFiles
     val scope = if (selected == 0) "upload" else "download"
     val listing = if (selected == 0) uploadValue else generatedValue
@@ -215,6 +216,9 @@ private fun JsonElement?.listingText(key: String): String =
 private fun JsonElement?.paginationInt(key: String, fallback: Int): Int =
     ((((this as? JsonObject)?.get("pagination") as? JsonObject)?.get(key)) as? JsonPrimitive)
         ?.contentOrNull?.toIntOrNull()?.coerceAtLeast(1) ?: fallback
+
+private fun JsonRecord.isDisplayableFile(): Boolean =
+    text("relative_path", "path", "id", "name", "filename").isNotBlank()
 
 private fun parentPath(path: String): String = path.trim('/').substringBeforeLast('/', "")
 

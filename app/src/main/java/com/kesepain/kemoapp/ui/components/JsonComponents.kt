@@ -54,13 +54,19 @@ class JsonRecord internal constructor(internal val source: JsonObject) {
 
 fun JsonElement?.records(vararg containerKeys: String): List<JsonRecord> {
     if (this == null || this is JsonNull) return emptyList()
+    var explicitContainerFound = false
     containerKeys.forEach { key ->
         val found = findKey(key)
+        if (found != null) explicitContainerFound = true
         if (key == "expands") found.groupedExpandRecords().takeIf { it.isNotEmpty() }?.let { return it }
         if (key == "knowledge") found.groupedItemRecords().takeIf { it.isNotEmpty() }?.let { return it }
         if (key == "sources") found.sourceRecords().takeIf { it.isNotEmpty() }?.let { return it }
         found?.directRecords()?.takeIf { it.isNotEmpty() }?.let { return it }
     }
+    // An explicitly present but empty collection is authoritative. Falling
+    // through to the response envelope would turn path/count/pagination
+    // metadata into a fake blank record on clean installations.
+    if (explicitContainerFound) return emptyList()
     val direct = directRecords()
     if (direct.any(JsonRecord::hasIdentity)) return direct
     val nested = mutableListOf<JsonRecord>()

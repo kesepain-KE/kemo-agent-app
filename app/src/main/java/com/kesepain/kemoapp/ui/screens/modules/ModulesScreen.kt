@@ -12,6 +12,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.ui.components.IllustratedEmptyState
+import com.kesepain.kemoapp.ui.components.JsonRecord
 import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 import com.kesepain.kemoapp.ui.components.ModuleDataCard
 import com.kesepain.kemoapp.ui.components.SectionHeader
@@ -20,8 +21,8 @@ import kotlinx.serialization.json.JsonElement
 
 @Composable
 fun ModulesScreen(expands: JsonElement?, senses: JsonElement?, pendingKeys: Set<String>, onRefresh: () -> Unit, onToggle: (String, String, String, Boolean) -> Unit) {
-    val expandItems = expands.records("expands")
-    val senseItems = senses.records("sources")
+    val expandItems = expands.records("expands").filter(JsonRecord::hasModuleIdentity)
+    val senseItems = senses.records("sources").filter(JsonRecord::hasModuleIdentity)
     LaunchedEffect(Unit) { onRefresh() }
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -63,3 +64,6 @@ fun ModulesScreen(expands: JsonElement?, senses: JsonElement?, pendingKeys: Set<
         }
     }
 }
+
+private fun JsonRecord.hasModuleIdentity(): Boolean =
+    text("display_name", "name", "id", "module_name").isNotBlank()
