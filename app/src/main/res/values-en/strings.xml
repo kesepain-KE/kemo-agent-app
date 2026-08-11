@@ -412,6 +412,7 @@
     <string name="feedback_account_exported">Encrypted account file exported</string>
     <string name="feedback_account_import_failed">Account import failed. Check the file and encryption password</string>
     <string name="feedback_account_export_failed">Account export failed. Check the password and save location</string>
+    <string name="feedback_account_switch_busy">Wait for the current operation to finish before switching accounts</string>
     <string name="feedback_theme_restored">Theme restored</string>
     <string name="about_project_information">Project information</string>
     <string name="about_app_ui_version">App UI version</string>

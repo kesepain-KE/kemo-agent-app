@@ -412,6 +412,7 @@
     <string name="feedback_account_exported">加密账号文件已导出</string>
     <string name="feedback_account_import_failed">账号导入失败，请检查文件和加密密码</string>
     <string name="feedback_account_export_failed">账号导出失败，请检查密码和保存位置</string>
+    <string name="feedback_account_switch_busy">当前操作完成后才能切换账号</string>
     <string name="feedback_theme_restored">主题已恢复</string>
     <string name="about_project_information">项目信息</string>
     <string name="about_app_ui_version">App UI 版本</string>

@@ -32,6 +32,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -141,40 +142,42 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
         Box(Modifier.fillMaxSize().padding(padding)) {
             NavHost(navController, startDestination = if (initialTask) "tasks" else "chat", modifier = Modifier.fillMaxSize()) {
             composable("chat") {
-                ChatScreen(
-                    state.chatEntries,
-                    state.conversations,
-                    state.status,
-                    state.streaming,
-                    state.chatClosed,
-                    viewModel::loadConversations,
-                    viewModel::switchConversation,
-                    viewModel::deleteConversation,
-                    viewModel::deleteAllConversations,
-                    viewModel::sendChat,
-                    viewModel::clearConversation,
-                    viewModel::retryLastResponse,
-                    viewModel::compressConversation,
-                    viewModel::saveAndNewConversation,
-                    viewModel::reportCopied,
-                    state.pendingChatAttachments,
-                    state.chatAttachmentUploading,
-                    state.guidanceSubmitting,
-                    state.chatStopping,
-                    viewModel::addChatAttachment,
-                    viewModel::removeChatAttachment,
-                    viewModel::stopChat,
-                    viewModel::loadChatMedia,
-                    { path -> viewModel.downloadFile("download", path) },
-                    viewModel::loadChatAttachment,
-                    state.filePreview,
-                    state.filePreview?.let { preview ->
-                        "download:${preview.scope}:${preview.path}" in pendingKeys
-                    } == true,
-                    viewModel::previewFile,
-                    viewModel::clearFilePreview,
-                    { path -> viewModel.downloadFile("upload", path) },
-                )
+                key(state.preferences.currentAccountId) {
+                    ChatScreen(
+                        state.chatEntries,
+                        state.conversations,
+                        state.status,
+                        state.streaming,
+                        state.chatClosed,
+                        viewModel::loadConversations,
+                        viewModel::switchConversation,
+                        viewModel::deleteConversation,
+                        viewModel::deleteAllConversations,
+                        viewModel::sendChat,
+                        viewModel::clearConversation,
+                        viewModel::retryLastResponse,
+                        viewModel::compressConversation,
+                        viewModel::saveAndNewConversation,
+                        viewModel::reportCopied,
+                        state.pendingChatAttachments,
+                        state.chatAttachmentUploading,
+                        state.guidanceSubmitting,
+                        state.chatStopping,
+                        viewModel::addChatAttachment,
+                        viewModel::removeChatAttachment,
+                        viewModel::stopChat,
+                        viewModel::loadChatMedia,
+                        { path -> viewModel.downloadFile("download", path) },
+                        viewModel::loadChatAttachment,
+                        state.filePreview,
+                        state.filePreview?.let { preview ->
+                            "download:${preview.scope}:${preview.path}" in pendingKeys
+                        } == true,
+                        viewModel::previewFile,
+                        viewModel::clearFilePreview,
+                        { path -> viewModel.downloadFile("upload", path) },
+                    )
+                }
             }
             composable("tasks") { TasksScreen(state.tasks, state.cron, pendingKeys, viewModel::loadTasks) }
             composable("status") { StatusScreen(state.status, "refresh:status" in pendingKeys, viewModel::loadStatus) }
@@ -207,7 +210,17 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     state.status,
                     MainViewModel.ACCOUNT_TRANSFER_IMPORT_KEY in pendingKeys,
                     MainViewModel.ACCOUNT_TRANSFER_EXPORT_KEY in pendingKeys,
-                    viewModel::switchAccount,
+                    onSwitch = { accountId ->
+                        if (viewModel.switchAccount(accountId)) {
+                            navController.navigate("chat") {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = false
+                                }
+                                launchSingleTop = true
+                                restoreState = false
+                            }
+                        }
+                    },
                     onEdit = { accountId -> editingAccountId = accountId; navController.navigate("connect") },
                     onDelete = viewModel::deleteAccount,
                     onAdd = { navController.navigate("connect") },
@@ -279,9 +292,9 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                         submittedAtVersion = null
                         editingAccountId = null
                         navController.navigate("chat") {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = false }
                             launchSingleTop = true
-                            restoreState = true
+                            restoreState = false
                         }
                     }
                 }
