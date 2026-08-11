@@ -103,7 +103,7 @@
     <string name="security">Security</string>
     <string name="auto_lock">Lock after 5 minutes in background</string>
     <string name="about">About</string>
-    <string name="version">Version 1.1.2</string>
+    <string name="version">Version 1.1.3</string>
     <string name="version_details">Version details</string>
     <string name="main_version">Main version</string>
     <string name="core_version">Core version</string>
@@ -431,6 +431,14 @@
     <string name="about_update_checking">Checking the latest version</string>
     <string name="about_update_available">Version %1$s is available</string>
     <string name="about_download_update">Download update from GitHub</string>
+    <string name="about_download_source">Download source</string>
+    <string name="about_download_source_auto">Smart selection (GitHub first)</string>
+    <string name="about_download_source_hint">%1$d switchable mirrors are built in. Smart selection always tries GitHub first and falls back automatically.</string>
+    <string name="about_download_source_security">Every source must pass the official GitHub SHA-256, APK package, version, and app-signing checks.</string>
+    <string name="about_update_source_active">Current source: %1$s</string>
+    <string name="about_update_verified">Integrity and app signature verified · %1$s</string>
+    <string name="about_update_failed_source">Last failed source: %1$s</string>
+    <string name="about_update_sha256">SHA-256 · %1$s…</string>
     <string name="about_update_latest">You are using the latest version</string>
     <string name="about_check_again">Check again</string>
     <string name="about_update_no_apk">The latest Release does not contain an APK</string>

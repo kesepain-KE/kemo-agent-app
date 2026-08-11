@@ -37,8 +37,11 @@ import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,7 +51,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,6 +74,7 @@ import com.kesepain.kemoapp.ui.components.LoadingButton
 import com.kesepain.kemoapp.ui.components.LoadingFilledTonalButton
 import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 import com.kesepain.kemoapp.update.AppAboutUiState
+import com.kesepain.kemoapp.update.AppDownloadSource
 import com.kesepain.kemoapp.update.AppUpdateRepository
 import com.kesepain.kemoapp.update.AppUpdateUiState
 import com.kesepain.kemoapp.update.GitHubRelease
@@ -77,7 +84,8 @@ fun AppAboutScreen(
     state: AppAboutUiState,
     onBack: () -> Unit,
     onLoad: () -> Unit,
-    onCheckUpdate: () -> Unit,
+    onCheckUpdate: (Boolean) -> Unit,
+    onSelectDownloadSource: (String) -> Unit,
     onDownloadUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
 ) {
@@ -88,7 +96,7 @@ fun AppAboutScreen(
     }
     LaunchedEffect(Unit) {
         onLoad()
-        if (state.update is AppUpdateUiState.Idle) onCheckUpdate()
+        if (state.update is AppUpdateUiState.Idle) onCheckUpdate(false)
     }
 
     LazyColumn(
@@ -154,7 +162,10 @@ fun AppAboutScreen(
             UpdateCard(
                 currentVersion = appVersion,
                 update = state.update,
-                onCheck = onCheckUpdate,
+                selectedSourceId = state.selectedDownloadSourceId,
+                downloadSources = AppUpdateRepository.DOWNLOAD_SOURCES,
+                onCheck = { onCheckUpdate(true) },
+                onSelectSource = onSelectDownloadSource,
                 onDownload = onDownloadUpdate,
                 onInstall = onInstallUpdate,
                 onOpenReleases = { openExternalUrl(context, AppUpdateRepository.GITHUB_RELEASES_URL) },
@@ -295,7 +306,10 @@ private fun AboutInfoRow(
 private fun UpdateCard(
     currentVersion: String,
     update: AppUpdateUiState,
+    selectedSourceId: String,
+    downloadSources: List<AppDownloadSource>,
     onCheck: () -> Unit,
+    onSelectSource: (String) -> Unit,
     onDownload: () -> Unit,
     onInstall: () -> Unit,
     onOpenReleases: () -> Unit,
@@ -338,6 +352,11 @@ private fun UpdateCard(
                 is AppUpdateUiState.Available -> {
                     ReleaseSummary(update.release)
                     UpdateStatus(Icons.Outlined.SystemUpdate, stringResource(R.string.about_update_available, update.release.tagName), MaterialTheme.colorScheme.primary)
+                    DownloadSourceSelector(
+                        selectedSourceId = selectedSourceId,
+                        sources = downloadSources,
+                        onSelected = onSelectSource,
+                    )
                     LoadingButton(onClick = onDownload, modifier = Modifier.fillMaxWidth(), shape = CircleShape) {
                         Icon(Icons.Outlined.Download, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.about_download_update))
                     }
@@ -371,6 +390,14 @@ private fun UpdateCard(
                 }
                 is AppUpdateUiState.Downloading -> {
                     ReleaseSummary(update.release)
+                    UpdateStatus(
+                        Icons.Outlined.Download,
+                        stringResource(
+                            R.string.about_update_source_active,
+                            update.source?.displayName ?: stringResource(R.string.about_download_source_auto),
+                        ),
+                        MaterialTheme.colorScheme.primary,
+                    )
                     LinearProgressIndicator(
                         progress = { update.progress / 100f },
                         modifier = Modifier.fillMaxWidth().height(6.dp),
@@ -385,6 +412,11 @@ private fun UpdateCard(
                 is AppUpdateUiState.Downloaded -> {
                     ReleaseSummary(update.release)
                     UpdateStatus(Icons.Outlined.CheckCircleOutline, stringResource(R.string.about_update_downloaded), MaterialTheme.colorScheme.primary)
+                    UpdateStatus(
+                        Icons.Outlined.CheckCircleOutline,
+                        stringResource(R.string.about_update_verified, update.source.displayName),
+                        MaterialTheme.colorScheme.primary,
+                    )
                     LoadingButton(onClick = onInstall, modifier = Modifier.fillMaxWidth(), shape = CircleShape) {
                         Icon(Icons.Outlined.SystemUpdate, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.about_install_update))
                     }
@@ -392,6 +424,18 @@ private fun UpdateCard(
                 is AppUpdateUiState.DownloadFailed -> {
                     ReleaseSummary(update.release)
                     UpdateStatus(Icons.Outlined.ErrorOutline, stringResource(R.string.about_update_download_failed), MaterialTheme.colorScheme.error)
+                    update.lastSource?.let { failedSource ->
+                        Text(
+                            stringResource(R.string.about_update_failed_source, failedSource.displayName),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DownloadSourceSelector(
+                        selectedSourceId = selectedSourceId,
+                        sources = downloadSources,
+                        onSelected = onSelectSource,
+                    )
                     LoadingOutlinedButton(onClick = onDownload, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Outlined.Download, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.retry))
                     }
@@ -411,6 +455,71 @@ private fun ReleaseSummary(release: GitHubRelease) {
             listOfNotNull(release.tagName.takeIf(String::isNotBlank), size).joinToString(" · "),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (release.apkSha256.isNotBlank()) {
+            Text(
+                stringResource(R.string.about_update_sha256, release.apkSha256.take(12)),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadSourceSelector(
+    selectedSourceId: String,
+    sources: List<AppDownloadSource>,
+    onSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = sources.firstOrNull { it.id == selectedSourceId }
+    val selectedLabel = selected?.displayName ?: stringResource(R.string.about_download_source_auto)
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(
+            stringResource(R.string.about_download_source),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Box(Modifier.fillMaxWidth()) {
+            LoadingOutlinedButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(selectedLabel, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.Filled.ArrowDropDown, null, Modifier.size(22.dp))
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.about_download_source_auto)) },
+                    onClick = {
+                        expanded = false
+                        onSelected(AppUpdateRepository.AUTO_DOWNLOAD_SOURCE_ID)
+                    },
+                )
+                sources.forEach { source ->
+                    DropdownMenuItem(
+                        text = { Text(source.displayName) },
+                        onClick = {
+                            expanded = false
+                            onSelected(source.id)
+                        },
+                    )
+                }
+            }
+        }
+        Text(
+            stringResource(R.string.about_download_source_hint, sources.count { !it.official }),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            stringResource(R.string.about_download_source_security),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
         )
     }
 }

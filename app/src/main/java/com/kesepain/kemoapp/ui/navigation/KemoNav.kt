@@ -266,6 +266,7 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     onBack = { navController.popBackStack() },
                     onLoad = viewModel::loadAppAbout,
                     onCheckUpdate = viewModel::checkForAppUpdate,
+                    onSelectDownloadSource = viewModel::selectAppUpdateDownloadSource,
                     onDownloadUpdate = viewModel::downloadAppUpdate,
                     onInstallUpdate = viewModel::installDownloadedUpdate,
                 )

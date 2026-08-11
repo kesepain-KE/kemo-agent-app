@@ -33,6 +33,7 @@ import com.kesepain.kemoapp.data.stream.StreamEvent
 import com.kesepain.kemoapp.data.stream.ToolStatus
 import com.kesepain.kemoapp.security.UnlockManager
 import com.kesepain.kemoapp.update.AppAboutUiState
+import com.kesepain.kemoapp.update.AppDownloadSource
 import com.kesepain.kemoapp.update.AppUpdateRepository
 import com.kesepain.kemoapp.update.AppUpdateUiState
 import com.kesepain.kemoapp.update.ReleaseCheckResult
@@ -820,7 +821,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun checkForAppUpdate() {
+    fun checkForAppUpdate(forceRefresh: Boolean = false) {
         if (_appAbout.value.update is AppUpdateUiState.Checking ||
             _appAbout.value.update is AppUpdateUiState.Downloading) return
         _appAbout.update { it.copy(update = AppUpdateUiState.Checking) }
@@ -830,7 +831,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     .getPackageInfo(getApplication<Application>().packageName, 0)
                     .versionName.orEmpty()
             }.getOrDefault("")
-            val result = runCatching { appUpdateRepository.checkLatestRelease(currentVersion) }
+            val result = runCatching { appUpdateRepository.checkLatestRelease(currentVersion, forceRefresh) }
             _appAbout.update { current ->
                 current.copy(
                     update = result.fold(
@@ -849,29 +850,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun selectAppUpdateDownloadSource(sourceId: String) {
+        val supported = sourceId == AppUpdateRepository.AUTO_DOWNLOAD_SOURCE_ID ||
+            AppUpdateRepository.DOWNLOAD_SOURCES.any { it.id == sourceId }
+        if (!supported || _appAbout.value.update is AppUpdateUiState.Downloading) return
+        _appAbout.update { it.copy(selectedDownloadSourceId = sourceId) }
+    }
+
     fun downloadAppUpdate() {
         val release = when (val update = _appAbout.value.update) {
             is AppUpdateUiState.Available -> update.release
             is AppUpdateUiState.DownloadFailed -> update.release
             else -> return
         }
+        val selectedSourceId = _appAbout.value.selectedDownloadSourceId
         _appAbout.update { it.copy(update = AppUpdateUiState.Downloading(release, 0)) }
         viewModelScope.launch {
+            var lastSource: AppDownloadSource? = null
+            var lastProgress = -1
             val result = runCatching {
-                appUpdateRepository.downloadApk(release) { downloaded, total ->
+                appUpdateRepository.downloadApk(release, selectedSourceId) { source, downloaded, total ->
                     val progress = if (total > 0L) ((downloaded * 100L) / total).toInt().coerceIn(0, 100) else 0
-                    _appAbout.update { current ->
-                        if (current.update is AppUpdateUiState.Downloading) {
-                            current.copy(update = AppUpdateUiState.Downloading(release, progress))
-                        } else current
+                    if (source.id != lastSource?.id || progress != lastProgress) {
+                        lastSource = source
+                        lastProgress = progress
+                        _appAbout.update { current ->
+                            if (current.update is AppUpdateUiState.Downloading) {
+                                current.copy(update = AppUpdateUiState.Downloading(release, progress, source))
+                            } else current
+                        }
                     }
                 }
             }
-            result.onSuccess { file ->
-                _appAbout.update { it.copy(update = AppUpdateUiState.Downloaded(release, file.absolutePath)) }
+            result.onSuccess { downloaded ->
+                _appAbout.update {
+                    it.copy(update = AppUpdateUiState.Downloaded(release, downloaded.file.absolutePath, downloaded.source))
+                }
                 _messages.emit(UiMessage(getApplication<Application>().getString(R.string.feedback_update_downloaded), UiMessageType.Success))
             }.onFailure {
-                _appAbout.update { it.copy(update = AppUpdateUiState.DownloadFailed(release)) }
+                _appAbout.update { it.copy(update = AppUpdateUiState.DownloadFailed(release, lastSource)) }
                 _messages.emit(UiMessage(getApplication<Application>().getString(R.string.feedback_update_download_failed), UiMessageType.Error))
             }
         }
@@ -882,7 +899,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val context = getApplication<Application>()
         val file = File(update.filePath)
         if (!file.isFile) {
-            _appAbout.update { it.copy(update = AppUpdateUiState.DownloadFailed(update.release)) }
+            _appAbout.update { it.copy(update = AppUpdateUiState.DownloadFailed(update.release, update.source)) }
             emitMessage(R.string.feedback_update_download_failed, UiMessageType.Error)
             return
         }
