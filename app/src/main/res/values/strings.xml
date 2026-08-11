@@ -11,6 +11,14 @@
     <string name="server_url">服务器地址</string>
     <string name="account_name">账号名称</string>
     <string name="save_account_name">保存名称</string>
+    <string name="import_account">导入账号</string>
+    <string name="export_account">导出账号</string>
+    <string name="account_transfer_password">文件加密密码</string>
+    <string name="confirm_account_transfer_password">确认文件加密密码</string>
+    <string name="account_transfer_password_hint">密码至少 8 位。账号文件使用 AES-256-GCM 加密；遗失密码后无法恢复。</string>
+    <string name="account_export_description">为账号“%1$s”设置文件加密密码，然后选择保存位置。导出文件不会包含本机 App 解锁密码；未保存在本机的用户密码无法导出。</string>
+    <string name="account_import_description">请输入导出时设置的文件加密密码。文件只在本机解密，其内容不会上传到服务器。</string>
+    <string name="choose_export_file">选择保存位置</string>
     <string name="device_token">设备 Token</string>
     <string name="username">用户名</string>
     <string name="password">用户密码</string>
@@ -95,7 +103,7 @@
     <string name="security">安全</string>
     <string name="auto_lock">后台 5 分钟自动锁定</string>
     <string name="about">关于</string>
-    <string name="version">版本 1.1.1</string>
+    <string name="version">版本 1.1.2</string>
     <string name="version_details">版本详情</string>
     <string name="main_version">主版本</string>
     <string name="core_version">核心版本</string>
@@ -400,6 +408,10 @@
     <string name="background_video_active">当前正在使用视频背景</string>
     <string name="feedback_background_updated">背景已更新</string>
     <string name="feedback_account_renamed">账号名称已更新</string>
+    <string name="feedback_account_imported">加密账号文件已导入</string>
+    <string name="feedback_account_exported">加密账号文件已导出</string>
+    <string name="feedback_account_import_failed">账号导入失败，请检查文件和加密密码</string>
+    <string name="feedback_account_export_failed">账号导出失败，请检查密码和保存位置</string>
     <string name="feedback_theme_restored">主题已恢复</string>
     <string name="about_project_information">项目信息</string>
     <string name="about_app_ui_version">App UI 版本</string>

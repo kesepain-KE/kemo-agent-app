@@ -1,16 +1,23 @@
 package com.kesepain.kemoapp.ui.screens.settings
 
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -20,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,14 +38,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import android.graphics.BitmapFactory
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.data.local.AccountConfig
+import com.kesepain.kemoapp.data.local.AccountTransferCodec
+import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 import com.kesepain.kemoapp.ui.components.SectionHeader
 import com.kesepain.kemoapp.ui.components.StatusChip
 import kotlinx.serialization.json.JsonElement
@@ -56,10 +67,14 @@ fun ProfileScreen(
     avatarBytes: ByteArray?,
     versions: JsonElement?,
     status: JsonElement?,
+    accountImportBusy: Boolean,
+    accountExportBusy: Boolean,
     onSwitch: (String) -> Unit,
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
     onAdd: () -> Unit,
+    onImport: (Uri, String) -> Unit,
+    onExport: (String, Uri, String) -> Unit,
     onSettings: () -> Unit,
     onConfiguration: () -> Unit,
     onAppSettings: () -> Unit,
@@ -71,6 +86,7 @@ fun ProfileScreen(
     onLogout: () -> Unit,
 ) {
     val context = LocalContext.current
+    val accountTransferBusy = accountImportBusy || accountExportBusy
     val appVersion = remember(context) {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
             .getOrNull().orEmpty().ifBlank { "—" }
@@ -83,6 +99,27 @@ fun ProfileScreen(
         ?: (health?.get("version") as? JsonPrimitive)?.contentOrNull
         ?: "—"
     var actionAccountId by rememberSaveable { mutableStateOf<String?>(null) }
+    var exportPasswordAccountId by remember { mutableStateOf<String?>(null) }
+    var exportPassword by remember { mutableStateOf("") }
+    var exportPasswordConfirmation by remember { mutableStateOf("") }
+    var pendingExport by remember { mutableStateOf<PendingAccountExport?>(null) }
+    var importSource by remember { mutableStateOf<Uri?>(null) }
+    var importPassword by remember { mutableStateOf("") }
+    val createAccountFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(AccountTransferCodec.MIME_TYPE),
+    ) { destination ->
+        val request = pendingExport
+        pendingExport = null
+        if (destination != null && request != null) {
+            onExport(request.accountId, destination, request.password)
+        }
+    }
+    val openAccountFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { source ->
+        if (source != null) {
+            importPassword = ""
+            importSource = source
+        }
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -114,7 +151,25 @@ fun ProfileScreen(
                 }
             }
         }
-        item { OutlinedButton(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.add_account)) } }
+        item {
+            OutlinedButton(onClick = onAdd, enabled = !accountTransferBusy, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.add_account))
+            }
+        }
+        item {
+            LoadingOutlinedButton(
+                onClick = {
+                    openAccountFile.launch(
+                        arrayOf(AccountTransferCodec.MIME_TYPE, "application/octet-stream"),
+                    )
+                },
+                enabled = !accountTransferBusy,
+                loading = accountImportBusy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.import_account))
+            }
+        }
 
         item { SectionHeader(stringResource(R.string.configuration)) }
         item { NavigationCard(stringResource(R.string.agent_configuration), stringResource(R.string.agent_configuration_summary), onConfiguration) }
@@ -137,22 +192,182 @@ fun ProfileScreen(
         AlertDialog(
             onDismissRequest = { actionAccountId = null },
             title = { Text(actionAccount.displayName.ifBlank { actionAccount.username }) },
-            text = { Text(stringResource(R.string.account_long_press_hint)) },
-            confirmButton = {
-                TextButton(onClick = { actionAccountId = null; onEdit(actionAccount.id) }) {
-                    Text(stringResource(R.string.edit_account))
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = { actionAccountId = null; onDelete(actionAccount.id) }) {
+            text = {
+                Column {
+                    Text(stringResource(R.string.account_long_press_hint))
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        onClick = { actionAccountId = null; onEdit(actionAccount.id) },
+                        enabled = !accountTransferBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.edit_account))
+                    }
+                    TextButton(
+                        onClick = {
+                            actionAccountId = null
+                            exportPassword = ""
+                            exportPasswordConfirmation = ""
+                            exportPasswordAccountId = actionAccount.id
+                        },
+                        enabled = !accountTransferBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.export_account))
+                    }
+                    TextButton(
+                        onClick = { actionAccountId = null; onDelete(actionAccount.id) },
+                        enabled = !accountTransferBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Text(stringResource(R.string.delete_account), color = MaterialTheme.colorScheme.error)
                     }
-                    TextButton(onClick = { actionAccountId = null }) { Text(stringResource(R.string.cancel)) }
                 }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { actionAccountId = null }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
+
+    val exportAccount = accounts.firstOrNull { it.id == exportPasswordAccountId }
+    if (exportAccount != null) {
+        ExportAccountPasswordDialog(
+            accountName = exportAccount.displayName.ifBlank { exportAccount.username },
+            password = exportPassword,
+            confirmation = exportPasswordConfirmation,
+            onPasswordChange = { exportPassword = it },
+            onConfirmationChange = { exportPasswordConfirmation = it },
+            onDismiss = {
+                exportPasswordAccountId = null
+                exportPassword = ""
+                exportPasswordConfirmation = ""
+            },
+            onConfirm = {
+                pendingExport = PendingAccountExport(exportAccount.id, exportPassword)
+                exportPasswordAccountId = null
+                exportPassword = ""
+                exportPasswordConfirmation = ""
+                createAccountFile.launch(exportFileName(exportAccount))
+            },
+        )
+    }
+
+    if (importSource != null) {
+        ImportAccountPasswordDialog(
+            password = importPassword,
+            onPasswordChange = { importPassword = it },
+            onDismiss = {
+                importSource = null
+                importPassword = ""
+            },
+            onConfirm = {
+                val source = importSource
+                val password = importPassword
+                importSource = null
+                importPassword = ""
+                if (source != null) onImport(source, password)
+            },
+        )
+    }
+}
+
+private data class PendingAccountExport(val accountId: String, val password: String)
+
+private fun exportFileName(account: AccountConfig): String {
+    val label = account.displayName.ifBlank { account.username }
+        .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        .trim()
+        .take(48)
+        .ifBlank { "account" }
+    return "kemo-account-$label.${AccountTransferCodec.FILE_EXTENSION}"
+}
+
+@Composable
+private fun ExportAccountPasswordDialog(
+    accountName: String,
+    password: String,
+    confirmation: String,
+    onPasswordChange: (String) -> Unit,
+    onConfirmationChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val passwordLongEnough = password.length >= AccountTransferCodec.MIN_PASSWORD_LENGTH
+    val passwordsMatch = password == confirmation
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.export_account)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(stringResource(R.string.account_export_description, accountName))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.account_transfer_password)) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = confirmation,
+                    onValueChange = onConfirmationChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.confirm_account_transfer_password)) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    isError = confirmation.isNotEmpty() && !passwordsMatch,
+                    singleLine = true,
+                )
+                Text(
+                    stringResource(R.string.account_transfer_password_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = passwordLongEnough && passwordsMatch) {
+                Text(stringResource(R.string.choose_export_file))
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+@Composable
+private fun ImportAccountPasswordDialog(
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.import_account)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(stringResource(R.string.account_import_description))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.account_transfer_password)) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = password.isNotEmpty()) {
+                Text(stringResource(R.string.import_account))
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 @Composable

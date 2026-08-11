@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kesepain.kemoapp.data.local.AccountConfig
+import com.kesepain.kemoapp.data.local.AccountTransferCodec
 import com.kesepain.kemoapp.data.local.AppPreferences
 import com.kesepain.kemoapp.data.local.Prefs
 import com.kesepain.kemoapp.data.local.SecureStore
@@ -50,6 +51,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonElement
@@ -59,6 +61,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import java.util.UUID
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.ZipInputStream
 
@@ -943,6 +946,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun exportAccount(id: String, destination: Uri, password: String) {
+        val passwordChars = password.toCharArray()
+        launchBusy(
+            key = ACCOUNT_TRANSFER_EXPORT_KEY,
+            successMessage = R.string.feedback_account_exported,
+            failureMessage = R.string.feedback_account_export_failed,
+        ) {
+            try {
+                require(passwordChars.size >= AccountTransferCodec.MIN_PASSWORD_LENGTH)
+                val encrypted = repo.exportAccount(id, passwordChars)
+                withContext(Dispatchers.IO) {
+                    val resolver = getApplication<Application>().contentResolver
+                    resolver.openOutputStream(destination, "w")?.use { output ->
+                        output.write(encrypted)
+                        output.flush()
+                    } ?: error("unable to open export destination")
+                }
+            } finally {
+                passwordChars.fill('\u0000')
+            }
+        }
+    }
+
+    fun importAccount(source: Uri, password: String) {
+        val passwordChars = password.toCharArray()
+        launchBusy(
+            key = ACCOUNT_TRANSFER_IMPORT_KEY,
+            successMessage = R.string.feedback_account_imported,
+            failureMessage = R.string.feedback_account_import_failed,
+        ) {
+            try {
+                require(passwordChars.isNotEmpty())
+                val encrypted = withContext(Dispatchers.IO) {
+                    val resolver = getApplication<Application>().contentResolver
+                    resolver.openInputStream(source)?.use(::readAccountTransferBytes)
+                        ?: error("unable to open account file")
+                }
+                val imported = repo.importAccount(encrypted, passwordChars)
+                if (prefs.snapshot().currentAccountId == imported.id) {
+                    eventSocket?.stop()
+                    startSocket()
+                }
+            } finally {
+                passwordChars.fill('\u0000')
+            }
+        }
+    }
+
     fun switchAccount(id: String) {
         viewModelScope.launch {
             prefs.setCurrentAccount(id)
@@ -1097,12 +1148,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .onFailure { failure -> _state.update { it.copy(error = getApplication<Application>().getString(R.string.error_generic)) } }
     }
 
-    private fun launchBusy(block: suspend () -> Unit) = launchBusyInternal(key = null, successMessage = null, block = block)
+    private fun launchBusy(block: suspend () -> Unit) =
+        launchBusyInternal(
+            key = null,
+            successMessage = null,
+            failureMessage = R.string.error_generic,
+            block = block,
+        )
 
-    private fun launchBusy(key: String, successMessage: Int? = null, block: suspend () -> Unit) =
-        launchBusyInternal(key = key, successMessage = successMessage, block = block)
+    private fun launchBusy(
+        key: String,
+        successMessage: Int? = null,
+        failureMessage: Int = R.string.error_generic,
+        block: suspend () -> Unit,
+    ) = launchBusyInternal(
+        key = key,
+        successMessage = successMessage,
+        failureMessage = failureMessage,
+        block = block,
+    )
 
-    private fun launchBusyInternal(key: String?, successMessage: Int?, block: suspend () -> Unit) {
+    private fun launchBusyInternal(
+        key: String?,
+        successMessage: Int?,
+        failureMessage: Int,
+        block: suspend () -> Unit,
+    ) {
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = "") }
             key?.let { pendingKey -> _pendingKeys.update { it + pendingKey } }
@@ -1112,8 +1183,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _messages.emit(UiMessage(getApplication<Application>().getString(message), UiMessageType.Success))
                     }
                 }
-                .onFailure { failure ->
-                    val errorText = getApplication<Application>().getString(R.string.error_generic)
+                .onFailure {
+                    val errorText = getApplication<Application>().getString(failureMessage)
                     _state.update { it.copy(error = errorText) }
                     _messages.emit(UiMessage(errorText, UiMessageType.Error))
                 }
@@ -1134,6 +1205,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _messages.emit(UiMessage(getApplication<Application>().getString(messageRes), type))
         }
+    }
+
+    private fun readAccountTransferBytes(input: java.io.InputStream): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            total += count
+            require(total <= AccountTransferCodec.MAX_FILE_BYTES) { "account file is too large" }
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
     }
 
     private suspend fun currentAccount(): AccountConfig? = prefs.snapshot().let { values -> values.accounts.firstOrNull { it.id == values.currentAccountId } }
@@ -1416,6 +1501,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.getOrDefault("")
 
     companion object {
+        const val ACCOUNT_TRANSFER_IMPORT_KEY = "account-transfer:import"
+        const val ACCOUNT_TRANSFER_EXPORT_KEY = "account-transfer:export"
         private const val STREAM_RENDER_INTERVAL_MS = 64L
         private val TEXT_PREVIEW_EXTENSIONS = setOf(
             "txt", "md", "markdown", "json", "xml", "csv", "tsv", "log", "ini", "conf", "yaml", "yml",

@@ -11,6 +11,14 @@
     <string name="server_url">Server URL</string>
     <string name="account_name">Account name</string>
     <string name="save_account_name">Save name</string>
+    <string name="import_account">Import account</string>
+    <string name="export_account">Export account</string>
+    <string name="account_transfer_password">File encryption password</string>
+    <string name="confirm_account_transfer_password">Confirm file encryption password</string>
+    <string name="account_transfer_password_hint">Use at least 8 characters. Account files use AES-256-GCM encryption and cannot be recovered if the password is lost.</string>
+    <string name="account_export_description">Set a file encryption password for “%1$s”, then choose where to save it. The file excludes this device’s App unlock password, and a user password that was not saved locally cannot be exported.</string>
+    <string name="account_import_description">Enter the file encryption password used during export. The file is decrypted only on this device and its contents are never uploaded to the server.</string>
+    <string name="choose_export_file">Choose save location</string>
     <string name="device_token">Device token</string>
     <string name="username">Username</string>
     <string name="password">User password</string>
@@ -95,7 +103,7 @@
     <string name="security">Security</string>
     <string name="auto_lock">Lock after 5 minutes in background</string>
     <string name="about">About</string>
-    <string name="version">Version 1.1.1</string>
+    <string name="version">Version 1.1.2</string>
     <string name="version_details">Version details</string>
     <string name="main_version">Main version</string>
     <string name="core_version">Core version</string>
@@ -400,6 +408,10 @@
     <string name="background_video_active">A video background is active</string>
     <string name="feedback_background_updated">Background updated</string>
     <string name="feedback_account_renamed">Account name updated</string>
+    <string name="feedback_account_imported">Encrypted account file imported</string>
+    <string name="feedback_account_exported">Encrypted account file exported</string>
+    <string name="feedback_account_import_failed">Account import failed. Check the file and encryption password</string>
+    <string name="feedback_account_export_failed">Account export failed. Check the password and save location</string>
     <string name="feedback_theme_restored">Theme restored</string>
     <string name="about_project_information">Project information</string>
     <string name="about_app_ui_version">App UI version</string>
