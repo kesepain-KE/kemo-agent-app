@@ -95,6 +95,14 @@ data class UiMessage(val text: String, val type: UiMessageType)
 
 data class AppUiState(
     val preferences: AppPreferences = AppPreferences(),
+    /** A saved account profile lets the user enter the local UI even when its session expired. */
+    val hasSavedAccounts: Boolean = false,
+    /** Session-only override used by the connection screen's direct-entry action. */
+    val directEntry: Boolean = false,
+    /** Changes for every background selection, including when a provider reuses the same URI. */
+    val themeBackgroundRevision: Long = 0L,
+    /** Monotonic signal consumed by the connection route after a successful login/save. */
+    val connectionSuccessVersion: Long = 0L,
     val configured: Boolean = false,
     val unlocked: Boolean = false,
     val busy: Boolean = false,
@@ -166,6 +174,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val account = values.accounts.firstOrNull { it.id == values.currentAccountId }
                 val credentials = account?.let { repo.credentialState(it.id) }
                 val configured = credentials?.sessionToken?.isNotBlank() == true && credentials.deviceToken.isNotBlank()
+                val hasSavedAccounts = values.accounts.isNotEmpty()
                 _state.update { current ->
                     if (!chatRestored) {
                         chatRestored = true
@@ -174,6 +183,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }.getOrDefault(emptyList()).takeLast(100)
                         current.copy(
                             preferences = values,
+                            hasSavedAccounts = hasSavedAccounts,
                             configured = configured,
                             chatEntries = restored,
                             chatSessionId = values.chatSessionId.ifBlank { "app-${UUID.randomUUID()}" },
@@ -185,6 +195,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     } else current.copy(
                         preferences = values,
+                        hasSavedAccounts = hasSavedAccounts,
                         configured = configured,
                         rememberedDeviceToken = credentials?.deviceToken.takeIf { credentials?.rememberCredentials == true }.orEmpty(),
                         rememberedUserPassword = credentials?.userPassword.orEmpty(),
@@ -192,9 +203,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 if (values.chatSessionId.isBlank() && _state.value.chatSessionId.isNotBlank()) persistChatNow()
-                if (configured && secure.get(requireNotNull(account).id, SecureStore.APP_PASSWORD_HASH).isNotBlank()) {
+                if (account != null && secure.get(account.id, SecureStore.APP_PASSWORD_HASH).isNotBlank()) {
                     // Security is configured; remain locked until explicit authentication.
-                } else if (configured) {
+                } else if (hasSavedAccounts) {
                     unlockManager.unlock()
                 }
             }
@@ -207,23 +218,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } }
     }
 
-    fun connect(baseUrl: String, deviceToken: String, username: String, password: String, appPassword: String, rememberCredentials: Boolean) {
-        connectInternal(null, baseUrl, deviceToken, username, password, appPassword, rememberCredentials)
+    fun enterAppDirectly() {
+        _state.update { it.copy(directEntry = true, error = "") }
+        unlockManager.unlock()
     }
 
-    fun reconnectAccount(accountId: String, baseUrl: String, deviceToken: String, username: String, password: String, appPassword: String, rememberCredentials: Boolean) {
-        connectInternal(accountId, baseUrl, deviceToken, username, password, appPassword, rememberCredentials)
+    fun connect(displayName: String, baseUrl: String, deviceToken: String, username: String, password: String, appPassword: String, rememberCredentials: Boolean) {
+        connectInternal(null, displayName, baseUrl, deviceToken, username, password, appPassword, rememberCredentials)
     }
 
-    private fun connectInternal(replaceAccountId: String?, baseUrl: String, deviceToken: String, username: String, password: String, appPassword: String, rememberCredentials: Boolean) {
+    fun reconnectAccount(accountId: String, displayName: String, baseUrl: String, deviceToken: String, username: String, password: String, appPassword: String, rememberCredentials: Boolean) {
+        connectInternal(accountId, displayName, baseUrl, deviceToken, username, password, appPassword, rememberCredentials)
+    }
+
+    private fun connectInternal(replaceAccountId: String?, displayName: String, baseUrl: String, deviceToken: String, username: String, password: String, appPassword: String, rememberCredentials: Boolean) {
         launchBusy {
             val existing = _state.value.preferences.accounts.firstOrNull { it.baseUrl == baseUrl.trimEnd('/') && it.username == username }
                 ?: replaceAccountId?.let { id -> _state.value.preferences.accounts.firstOrNull { it.id == id } }
             val effectiveToken = deviceToken.ifBlank { existing?.let { repo.credentialState(it.id).deviceToken }.orEmpty() }
             require(effectiveToken.isNotBlank()) { "device token is required" }
-            val connectedAccount = repo.login(baseUrl, effectiveToken, username, password, appPassword, rememberCredentials)
+            val connectedAccount = repo.login(displayName, baseUrl, effectiveToken, username, password, appPassword, rememberCredentials)
             if (replaceAccountId != null && replaceAccountId != connectedAccount.id) repo.deleteAccount(replaceAccountId)
             unlockManager.unlock()
+            _state.update { current ->
+                current.copy(
+                    connectionSuccessVersion = current.connectionSuccessVersion + 1L,
+                    error = "",
+                )
+            }
             loadDashboard()
         }
     }
@@ -753,6 +775,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadDashboard() {
+        if (!_state.value.configured) return
         viewModelScope.launch {
             loadTasksInternal()
             loadStatusInternal()
@@ -943,6 +966,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (previous.isNotBlank() && previous != uri) releaseThemeBackgroundPermission(previous)
             prefs.setThemeBackground(uri, mimeType)
             _messages.emit(UiMessage(getApplication<Application>().getString(R.string.feedback_background_updated), UiMessageType.Success))
+        }
+    }
+
+    fun renameAccount(id: String, displayName: String) {
+        val normalized = displayName.trim()
+        if (normalized.isBlank()) return
+        viewModelScope.launch {
+            prefs.renameAccount(id, normalized)
+            emitMessage(R.string.feedback_account_renamed, UiMessageType.Success)
         }
     }
 

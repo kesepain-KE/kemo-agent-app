@@ -17,7 +17,12 @@ import kotlinx.serialization.json.Json
 val Context.kemoDataStore by preferencesDataStore("kemo_preferences")
 
 @Serializable
-data class AccountConfig(val id: String, val baseUrl: String, val username: String)
+data class AccountConfig(
+    val id: String,
+    val baseUrl: String,
+    val username: String,
+    val displayName: String = "",
+)
 
 data class AppPreferences(
     val accounts: List<AccountConfig> = emptyList(),
@@ -92,6 +97,19 @@ class Prefs(private val context: Context) {
         context.kemoDataStore.edit { values ->
             values[TONE] = value
             values[DYNAMIC_COLOR] = false
+        }
+    }
+
+    suspend fun renameAccount(id: String, displayName: String) {
+        context.kemoDataStore.edit { values ->
+            val current = runCatching {
+                json.decodeFromString<List<AccountConfig>>(values[ACCOUNTS] ?: "[]")
+            }.getOrDefault(emptyList())
+            values[ACCOUNTS] = json.encodeToString(
+                current.map { account ->
+                    if (account.id == id) account.copy(displayName = displayName.trim()) else account
+                },
+            )
         }
     }
     suspend fun setLanguage(value: String) = set(LANGUAGE, value)

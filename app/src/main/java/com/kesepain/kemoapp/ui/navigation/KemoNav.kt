@@ -267,19 +267,39 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                 )
             }
             composable("connect") {
-                val current = state.preferences.accounts.firstOrNull { it.id == (editingAccountId ?: state.preferences.currentAccountId) }
+                var submittedAtVersion by remember { mutableStateOf<Long?>(null) }
+                LaunchedEffect(state.connectionSuccessVersion, state.busy, submittedAtVersion) {
+                    val submittedVersion = submittedAtVersion ?: return@LaunchedEffect
+                    if (!state.busy && state.connectionSuccessVersion > submittedVersion) {
+                        submittedAtVersion = null
+                        editingAccountId = null
+                        navController.navigate("chat") {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                }
+                // A new account starts with an empty form; only the explicit edit
+                // route receives an existing account's name and endpoint.
+                val current = editingAccountId?.let { accountId ->
+                    state.preferences.accounts.firstOrNull { it.id == accountId }
+                }
                 ConnectScreen(
                     current = current,
                     busy = state.busy,
                     error = state.error,
-                    rememberedDeviceToken = if (editingAccountId == null || editingAccountId == state.preferences.currentAccountId) state.rememberedDeviceToken else "",
-                    rememberedUserPassword = if (editingAccountId == null || editingAccountId == state.preferences.currentAccountId) state.rememberedUserPassword else "",
+                    rememberedDeviceToken = if (editingAccountId != null && editingAccountId == state.preferences.currentAccountId) state.rememberedDeviceToken else "",
+                    rememberedUserPassword = if (editingAccountId != null && editingAccountId == state.preferences.currentAccountId) state.rememberedUserPassword else "",
                     initiallyRememberCredentials = state.rememberCredentials,
-                    onConnect = { baseUrl, token, username, password, appPassword, rememberCredentials ->
+                    onConnect = { displayName, baseUrl, token, username, password, appPassword, rememberCredentials ->
+                        submittedAtVersion = state.connectionSuccessVersion
                         val editing = editingAccountId
-                        if (editing == null) viewModel.connect(baseUrl, token, username, password, appPassword, rememberCredentials)
-                        else viewModel.reconnectAccount(editing, baseUrl, token, username, password, appPassword, rememberCredentials)
+                        if (editing == null) viewModel.connect(displayName, baseUrl, token, username, password, appPassword, rememberCredentials)
+                        else viewModel.reconnectAccount(editing, displayName, baseUrl, token, username, password, appPassword, rememberCredentials)
                     },
+                    onEnterDirectly = { navController.popBackStack() },
+                    onRename = editingAccountId?.let { accountId -> { name -> viewModel.renameAccount(accountId, name) } },
                 )
             }
             }

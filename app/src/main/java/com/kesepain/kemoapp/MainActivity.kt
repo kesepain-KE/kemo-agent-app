@@ -88,7 +88,7 @@ class MainActivity : FragmentActivity() {
                                 contentScale = ContentScale.Fit,
                             )
                         }
-                        !state.configured -> {
+                        !state.hasSavedAccounts && !state.directEntry -> {
                             val current = state.preferences.accounts.firstOrNull { it.id == state.preferences.currentAccountId }
                             ConnectScreen(
                                 current = current,
@@ -98,6 +98,7 @@ class MainActivity : FragmentActivity() {
                                 rememberedUserPassword = state.rememberedUserPassword,
                                 initiallyRememberCredentials = state.rememberCredentials,
                                 onConnect = viewModel::connect,
+                                onEnterDirectly = viewModel::enterAppDirectly,
                             )
                         }
                         !state.unlocked -> {

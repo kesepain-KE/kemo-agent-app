@@ -9,12 +9,15 @@
     <string name="connect_title">连接 Kemo</string>
     <string name="connect_subtitle">配置桥接服务地址并完成两级认证</string>
     <string name="server_url">服务器地址</string>
+    <string name="account_name">账号名称</string>
+    <string name="save_account_name">保存名称</string>
     <string name="device_token">设备 Token</string>
     <string name="username">用户名</string>
     <string name="password">用户密码</string>
     <string name="app_password">App 密码（可选）</string>
     <string name="connect">连接并保存</string>
     <string name="connecting">正在连接…</string>
+    <string name="enter_app_directly">直接进入内部界面</string>
     <string name="remember_credentials">记住凭证</string>
     <string name="remember_credentials_limit">凭证使用 Android Keystore 加密保存，最长保留 7 天</string>
     <string name="unlock_title">欢迎回来</string>
@@ -396,6 +399,7 @@
     <string name="background_image_active">当前正在使用静态图片背景</string>
     <string name="background_video_active">当前正在使用视频背景</string>
     <string name="feedback_background_updated">背景已更新</string>
+    <string name="feedback_account_renamed">账号名称已更新</string>
     <string name="feedback_theme_restored">主题已恢复</string>
     <string name="about_project_information">项目信息</string>
     <string name="about_app_ui_version">App UI 版本</string>

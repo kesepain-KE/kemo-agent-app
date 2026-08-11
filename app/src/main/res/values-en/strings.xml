@@ -9,12 +9,15 @@
     <string name="connect_title">Connect to Kemo</string>
     <string name="connect_subtitle">Configure the bridge server and complete two-level authentication</string>
     <string name="server_url">Server URL</string>
+    <string name="account_name">Account name</string>
+    <string name="save_account_name">Save name</string>
     <string name="device_token">Device token</string>
     <string name="username">Username</string>
     <string name="password">User password</string>
     <string name="app_password">App password (optional)</string>
     <string name="connect">Connect and save</string>
     <string name="connecting">Connecting…</string>
+    <string name="enter_app_directly">Enter the app directly</string>
     <string name="remember_credentials">Remember credentials</string>
     <string name="remember_credentials_limit">Credentials are encrypted with Android Keystore and retained for no more than 7 days</string>
     <string name="unlock_title">Welcome back</string>
@@ -396,6 +399,7 @@
     <string name="background_image_active">A static image background is active</string>
     <string name="background_video_active">A video background is active</string>
     <string name="feedback_background_updated">Background updated</string>
+    <string name="feedback_account_renamed">Account name updated</string>
     <string name="feedback_theme_restored">Theme restored</string>
     <string name="about_project_information">Project information</string>
     <string name="about_app_ui_version">App UI version</string>

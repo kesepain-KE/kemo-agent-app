@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.data.local.AccountConfig
 import com.kesepain.kemoapp.ui.components.LoadingButton
+import com.kesepain.kemoapp.ui.components.LoadingFilledTonalButton
+import com.kesepain.kemoapp.ui.components.LoadingOutlinedButton
 
 @Composable
 fun ConnectScreen(
@@ -37,8 +39,11 @@ fun ConnectScreen(
     rememberedDeviceToken: String,
     rememberedUserPassword: String,
     initiallyRememberCredentials: Boolean,
-    onConnect: (String, String, String, String, String, Boolean) -> Unit,
+    onConnect: (String, String, String, String, String, String, Boolean) -> Unit,
+    onEnterDirectly: () -> Unit,
+    onRename: ((String) -> Unit)? = null,
 ) {
+    var displayName by remember(current) { mutableStateOf(current?.displayName?.ifBlank { current.username }.orEmpty()) }
     var baseUrl by remember(current) { mutableStateOf(current?.baseUrl ?: "http://10.0.2.2:8742") }
     var token by remember(current, rememberedDeviceToken) { mutableStateOf(rememberedDeviceToken) }
     var username by remember(current) { mutableStateOf(current?.username.orEmpty()) }
@@ -52,6 +57,15 @@ fun ConnectScreen(
         Text(stringResource(R.string.connect_title), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.connect_subtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(24.dp))
+        Field(displayName, { displayName = it }, R.string.account_name)
+        if (current != null && onRename != null) {
+            LoadingOutlinedButton(
+                onClick = { onRename(displayName) },
+                enabled = displayName.isNotBlank() && displayName.trim() != current.displayName.ifBlank { current.username },
+                modifier = Modifier.fillMaxWidth().height(48.dp).padding(bottom = 10.dp),
+                shape = RoundedCornerShape(18.dp),
+            ) { Text(stringResource(R.string.save_account_name)) }
+        }
         Field(baseUrl, { baseUrl = it }, R.string.server_url)
         Field(token, { token = it }, R.string.device_token, true)
         Field(username, { username = it }, R.string.username)
@@ -73,12 +87,19 @@ fun ConnectScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         LoadingButton(
-            onClick = { onConnect(baseUrl, token, username, password, appPassword, rememberCredentials) },
+            onClick = { onConnect(displayName, baseUrl, token, username, password, appPassword, rememberCredentials) },
             enabled = baseUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
             loading = busy,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(18.dp),
         ) { Text(stringResource(if (busy) R.string.connecting else R.string.connect)) }
+        Spacer(Modifier.height(10.dp))
+        LoadingFilledTonalButton(
+            onClick = onEnterDirectly,
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(18.dp),
+        ) { Text(stringResource(R.string.enter_app_directly)) }
     }
 }
 

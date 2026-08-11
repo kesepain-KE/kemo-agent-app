@@ -86,9 +86,9 @@ fun ProfileScreen(
     LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                UserAvatar(avatarBytes, current?.username.orEmpty())
+                UserAvatar(avatarBytes, current?.displayName?.ifBlank { current.username }.orEmpty())
                 Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                    Text(current?.username ?: stringResource(R.string.profile_title), style = MaterialTheme.typography.titleLarge)
+                    Text(current?.displayName?.ifBlank { current.username } ?: stringResource(R.string.profile_title), style = MaterialTheme.typography.titleLarge)
                     Text(stringResource(R.string.kemo_account), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 StatusChip(if (connected) stringResource(R.string.connected) else stringResource(R.string.disconnected))
@@ -99,7 +99,7 @@ fun ProfileScreen(
         items(accounts, key = { it.id }) { account ->
             Card(
                 modifier = Modifier.fillMaxWidth().combinedClickable(
-                    onClick = { if (account.id != currentId) onSwitch(account.id) },
+                    onClick = { actionAccountId = account.id },
                     onLongClick = { actionAccountId = account.id },
                 ),
                 shape = RoundedCornerShape(20.dp),
@@ -107,7 +107,7 @@ fun ProfileScreen(
             ) {
                 Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(account.username, style = MaterialTheme.typography.titleMedium)
+                        Text(account.displayName.ifBlank { account.username }, style = MaterialTheme.typography.titleMedium)
                         Text(account.baseUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (account.id != currentId) OutlinedButton(onClick = { onSwitch(account.id) }) { Text(stringResource(R.string.switch_account)) }
@@ -136,7 +136,7 @@ fun ProfileScreen(
     if (actionAccount != null) {
         AlertDialog(
             onDismissRequest = { actionAccountId = null },
-            title = { Text(actionAccount.username) },
+            title = { Text(actionAccount.displayName.ifBlank { actionAccount.username }) },
             text = { Text(stringResource(R.string.account_long_press_hint)) },
             confirmButton = {
                 TextButton(onClick = { actionAccountId = null; onEdit(actionAccount.id) }) {

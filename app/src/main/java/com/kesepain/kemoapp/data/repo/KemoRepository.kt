@@ -58,6 +58,7 @@ class KemoRepository(private val context: Context) {
     var onSessionExpired: (() -> Unit)? = null
 
     suspend fun login(
+        displayName: String,
         baseUrl: String,
         deviceToken: String,
         username: String,
@@ -65,7 +66,12 @@ class KemoRepository(private val context: Context) {
         appPassword: String,
         rememberCredentials: Boolean,
     ): AccountConfig = withContext(Dispatchers.IO) {
-        val account = AccountConfig(accountId(baseUrl, username), baseUrl.trimEnd('/'), username)
+        val account = AccountConfig(
+            id = accountId(baseUrl, username),
+            baseUrl = baseUrl.trimEnd('/'),
+            username = username,
+            displayName = displayName.trim(),
+        )
         val bundle = ApiClient.create(account, ApiSecrets(deviceToken, ""))
         bundle.client.newCall(
             Request.Builder().url(bundle.baseUrl + "v1/auth/device").post("{}".toRequestBody(ApiClient.jsonMediaType)).build()
