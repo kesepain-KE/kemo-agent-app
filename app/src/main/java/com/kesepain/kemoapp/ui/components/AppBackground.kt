@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -39,7 +40,13 @@ import kotlinx.coroutines.withContext
 import kotlin.math.max
 
 @Composable
-fun AppBackground(uriValue: String, mimeType: String, darkTheme: Boolean, modifier: Modifier = Modifier) {
+fun AppBackground(
+    uriValue: String,
+    mimeType: String,
+    darkTheme: Boolean,
+    reloadKey: Long = 0L,
+    modifier: Modifier = Modifier,
+) {
     if (uriValue.isBlank()) return
     val chatScrolling by BackgroundPerformanceController.scrolling.collectAsState()
     Box(modifier.fillMaxSize()) {
@@ -47,10 +54,15 @@ fun AppBackground(uriValue: String, mimeType: String, darkTheme: Boolean, modifi
             scaleX = 1.01f
             scaleY = 1.01f
         }.blur(if (chatScrolling) 0.dp else 1.dp)
-        if (mimeType.startsWith("video/")) {
-            VideoBackground(uriValue, chatScrolling, mediaModifier)
-        } else {
-            ImageBackground(uriValue, mediaModifier)
+        // Some document providers reuse the same content URI when a user picks
+        // a replacement. The explicit revision key recreates both bitmap and
+        // MediaPlayer state even when uriValue and mimeType did not change.
+        key(uriValue, mimeType, reloadKey) {
+            if (mimeType.startsWith("video/")) {
+                VideoBackground(uriValue, chatScrolling, mediaModifier)
+            } else {
+                ImageBackground(uriValue, mediaModifier)
+            }
         }
         Box(
             Modifier.fillMaxSize().background(

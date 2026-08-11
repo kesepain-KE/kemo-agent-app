@@ -960,7 +960,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setThemeBackground(uri: String, mimeType: String) {
         val previous = _state.value.preferences.themeBackgroundUri
         _state.update { current ->
-            current.copy(preferences = current.preferences.copy(themeBackgroundUri = uri, themeBackgroundMime = mimeType))
+            current.copy(
+                preferences = current.preferences.copy(themeBackgroundUri = uri, themeBackgroundMime = mimeType),
+                themeBackgroundRevision = current.themeBackgroundRevision + 1L,
+            )
         }
         viewModelScope.launch {
             if (previous.isNotBlank() && previous != uri) releaseThemeBackgroundPermission(previous)
@@ -989,6 +992,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     themeBackgroundUri = "",
                     themeBackgroundMime = "",
                 ),
+                themeBackgroundRevision = current.themeBackgroundRevision + 1L,
             )
         }
         viewModelScope.launch {
