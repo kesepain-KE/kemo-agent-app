@@ -19,6 +19,7 @@
 
 <p align="center">
   <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.0-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
 
@@ -155,6 +156,9 @@ cd kemo-agent-app
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
+
+项目 CI 会同时校验 Gradle、中英文版本资源、中英文 README、GitHub Release 标签和 APK 清单中的
+版本号是否一致。完整发布检查规则见 [`docs/RELEASING.md`](docs/RELEASING.md)。
 
 ### 连接你的智能体
 

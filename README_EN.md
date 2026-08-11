@@ -19,6 +19,7 @@
 
 <p align="center">
   <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.0-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
 
@@ -155,6 +156,10 @@ The APK is generated at:
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
+
+CI verifies that Gradle, the localized version resources, both READMEs, the GitHub Release tag, and the APK
+manifest all report the same version. See [`docs/RELEASING.md`](docs/RELEASING.md) for the complete
+release contract.
 
 ### Connect your agent
 

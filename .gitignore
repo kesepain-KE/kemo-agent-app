@@ -12,3 +12,7 @@ local.properties
 开发文档/
 开发临时/
 .DS_Store
+
+# Python release-contract test cache
+__pycache__/
+*.py[cod]

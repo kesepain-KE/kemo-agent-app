@@ -58,6 +58,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
 @Composable
@@ -291,7 +293,7 @@ private class NetworkMarkdownImageTransformer : ImageTransformer {
                         if (!response.isSuccessful) return@use null
                         val body = response.body ?: return@use null
                         if (body.contentLength() > MAX_IMAGE_BYTES) return@use null
-                        val bytes = body.byteStream().use { it.readNBytes(MAX_IMAGE_BYTES + 1) }
+                        val bytes = body.byteStream().use { it.readUpTo(MAX_IMAGE_BYTES + 1) }
                         if (bytes.size > MAX_IMAGE_BYTES) return@use null
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.let(::BitmapPainter)
                     }
@@ -314,6 +316,31 @@ private class NetworkMarkdownImageTransformer : ImageTransformer {
             .readTimeout(12, TimeUnit.SECONDS)
             .build()
     }
+}
+
+/** API 26-compatible bounded read used for Markdown images with unknown content length. */
+internal fun InputStream.readUpTo(maxBytes: Int): ByteArray {
+    require(maxBytes > 0)
+    val output = ByteArrayOutputStream(minOf(maxBytes, DEFAULT_BUFFER_SIZE * 2))
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var remaining = maxBytes
+    while (remaining > 0) {
+        val count = read(buffer, 0, minOf(buffer.size, remaining))
+        when {
+            count < 0 -> break
+            count == 0 -> {
+                val single = read()
+                if (single < 0) break
+                output.write(single)
+                remaining -= 1
+            }
+            else -> {
+                output.write(buffer, 0, count)
+                remaining -= count
+            }
+        }
+    }
+    return output.toByteArray()
 }
 
 internal data class StreamingMarkdownParts(
