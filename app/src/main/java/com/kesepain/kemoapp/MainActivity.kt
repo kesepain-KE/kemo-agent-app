@@ -75,6 +75,7 @@ class MainActivity : FragmentActivity() {
                         uriValue = state.preferences.themeBackgroundUri,
                         mimeType = state.preferences.themeBackgroundMime,
                         darkTheme = dark,
+                        reloadKey = state.themeBackgroundRevision,
                     )
                     when {
                         showSplash -> Box(
