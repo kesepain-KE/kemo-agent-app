@@ -296,7 +296,9 @@ class KemoRepository(private val context: Context) {
     }
 
     suspend fun health(): JsonElement = call { it.health() }
-    suspend fun conversations(): JsonElement = call { it.conversations() }
+    suspend fun conversations(limit: Int = 50): JsonElement = call { it.conversations(limit) }
+
+    suspend fun activeConversation(clientId: String): JsonElement = call { it.activeConversation(clientId) }
     suspend fun deleteAllConversations(): JsonElement = call { it.deleteAllConversations() }
     suspend fun conversationMessages(id: String): JsonElement = call { it.conversationMessages(id) }
     suspend fun deleteConversation(id: String): JsonElement = call { it.deleteConversation(id) }

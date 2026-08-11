@@ -18,6 +18,7 @@ import retrofit2.http.Streaming
 interface RestApi {
     @GET("v1/health") suspend fun health(): Response<ResponseBody>
     @GET("v1/conversations") suspend fun conversations(@Query("limit") limit: Int = 50): Response<ResponseBody>
+    @GET("v1/conversations/active") suspend fun activeConversation(@Query("client_id") clientId: String): Response<ResponseBody>
     @DELETE("v1/conversations") suspend fun deleteAllConversations(): Response<ResponseBody>
     @GET("v1/conversations/{id}/messages") suspend fun conversationMessages(@Path("id") id: String, @Query("limit") limit: Int = 100): Response<ResponseBody>
     @DELETE("v1/conversations/{id}") suspend fun deleteConversation(@Path("id") id: String): Response<ResponseBody>
