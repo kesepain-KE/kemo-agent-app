@@ -220,16 +220,21 @@ If you are trying an early release, reports about problems and usability feedbac
 
 ---
 
-## Related projects
+## The Kemo ecosystem
 
-- [kemo-agent](https://github.com/kesepain-KE/kemo-agent)  
+kemo-agent-app is not an island. It is the mobile entrance to the Kemo ecosystem, connecting several independently maintained projects that cooperate through stable protocols:
+
+- [kemo-agent](https://github.com/kesepain-KE/kemo-agent)
   The core agent framework this app connects to: a local multi-user Agent Runtime with conversation, memory, tasks, knowledge, extensions, and perception.
 
-- [kemo-adapter-api](https://github.com/kesepain-KE/kemo-adapter-api)  
-  A model-service adapter gateway for kemo-agent; kemo-agent-app bridges through it with two-level authentication.
+- [kemo-adapter-api](https://github.com/kesepain-KE/kemo-adapter-api)
+  Kemo Provider Gateway: unified multi-provider model discovery, streaming responses, tool calls, capability declarations, multimodal assets, and token metering; kemo-agent-app bridges through it with two-level authentication.
 
-- [kemo-graph](https://github.com/kesepain-KE/kemo-graph)  
-  A knowledge-graph and RAG retrieval project that can be attached to kemo-agent as an external document station.
+- [kemo-graph](https://github.com/kesepain-KE/kemo-graph)
+  A knowledge-graph and RAG retrieval project that can be attached to kemo-agent as an external document station: after registering a document library, you query, sync, and maintain it on demand through `expand_call`, without replacing the framework's built-in knowledge base or memory.
+
+- [kemo-agent-doc](https://github.com/kesepain-KE/kemo-agent-doc)
+  The VitePress documentation site for kemo-agent: installation, configuration, usage, and extension development guides, deployed as [online documentation](https://kesepain-ke.github.io/kemo-agent-doc/).
 
 ---
 

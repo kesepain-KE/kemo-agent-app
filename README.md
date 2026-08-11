@@ -219,16 +219,21 @@ kemo-agent-app 并不试图替代网页端或命令行。
 
 ---
 
-## 相关项目
+## Kemo 生态
 
-- [kemo-agent](https://github.com/kesepain-KE/kemo-agent)  
+kemo-agent-app 不是孤岛。它是 Kemo 生态在手机上的入口，连接着几个独立维护、通过稳定协议协作的项目：
+
+- [kemo-agent](https://github.com/kesepain-KE/kemo-agent)
   本项目所连接的核心智能体框架：本地多用户 Agent Runtime，提供对话、记忆、任务、知识、拓展与感知等完整能力。
 
-- [kemo-adapter-api](https://github.com/kesepain-KE/kemo-adapter-api)  
-  与 kemo-agent 配合使用的模型服务适配网关，kemo-agent-app 通过它完成桥接与两级认证。
+- [kemo-adapter-api](https://github.com/kesepain-KE/kemo-adapter-api)
+  Kemo Provider Gateway：统一多厂商模型的发现、流式响应、工具调用、能力声明、多模态 Asset 与 Token 计量；kemo-agent-app 通过它完成桥接与两级认证。
 
-- [kemo-graph](https://github.com/kesepain-KE/kemo-graph)  
-  知识图谱与 RAG 检索项目，可外挂为 kemo-agent 的超级文档站。
+- [kemo-graph](https://github.com/kesepain-KE/kemo-graph)
+  知识图谱与 RAG 检索项目，可外挂为 kemo-agent 的超级文档站：注册文档库后，通过 `expand_call` 按需查询、同步与维护，不替换框架内置的知识库与记忆。
+
+- [kemo-agent-doc](https://github.com/kesepain-KE/kemo-agent-doc)
+  kemo-agent 的 VitePress 文档站：安装、配置、使用与扩展开发指南，已部署为 [在线文档](https://kesepain-ke.github.io/kemo-agent-doc/)。
 
 ---
 
