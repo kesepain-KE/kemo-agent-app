@@ -2,10 +2,10 @@
 
 `app/build.gradle.kts` 是 App 版本的唯一源头：
 
-- `versionName` 必须使用完整 SemVer，例如 `1.1.2`；
+- `versionName` 必须使用完整 SemVer，例如 `1.1.3`；
 - `versionCode` 必须是正整数，每次对外发布新的 APK 时递增；
-- GitHub Release 标签使用 `kemo-v{versionName}`，例如 `kemo-v1.1.2`；版本检查器也兼容
-  `v1.1.2` 形式的简写标签。
+- GitHub Release 标签使用 `kemo-v{versionName}`，例如 `kemo-v1.1.3`；版本检查器也兼容
+  `v1.1.3` 形式的简写标签。
 
 发布前还必须同步以下可见版本信息：
 
@@ -19,7 +19,7 @@
 仅检查源码、文档、中英文资源与更新仓库地址：
 
 ```powershell
-python scripts/release_contract.py --expected-tag kemo-v1.1.2
+python scripts/release_contract.py --expected-tag kemo-v1.1.3
 ```
 
 构建并检查 APK 输出元数据：
@@ -27,7 +27,7 @@ python scripts/release_contract.py --expected-tag kemo-v1.1.2
 ```powershell
 .\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain
 python scripts/release_contract.py `
-  --expected-tag kemo-v1.1.2 `
+  --expected-tag kemo-v1.1.3 `
   --metadata app/build/outputs/apk/debug/output-metadata.json
 ```
 
@@ -61,4 +61,4 @@ python -m unittest discover -s scripts/tests -p "test_*.py" -v
 版本”的发布结果。
 
 已经发布的历史 Release 可以从 GitHub Actions 手动运行此工作流，并在 `release_tag` 输入框
-填写标签（例如 `kemo-v1.1.2`）重新核验。留空手动运行时只执行源码、测试、Lint 和本地构建产物检查。
+填写标签（例如 `kemo-v1.1.3`）重新核验。留空手动运行时只执行源码、测试、Lint 和本地构建产物检查。

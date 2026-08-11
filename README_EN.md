@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.2-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.3-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -187,7 +187,9 @@ No matter which entry point you use, it connects to the same agent, the same his
 
 ## Current status
 
-Current version: `1.1.2` (versionCode 4)
+Current version: `1.1.3` (versionCode 5)
+
+`1.1.3` focuses on the in-App update pipeline: it fixes `kemo-v` Release tags being mistaken for the installed version, adds a five-minute check cache with an official GitHub Release-page fallback when the API is rate-limited, and provides GitHub-first downloads with four built-in mirrors for manual selection and automatic failover. Before installation, every APK must pass the official GitHub SHA-256, package-name, version, and app-signature checks, while the UI reports the active source, progress, and verification result.
 
 `1.1.2` adds password-encrypted `.kemoaccount` file import and export to account management. Exported files use PBKDF2-HMAC-SHA256 key derivation and AES-256-GCM authenticated encryption and are read or written only through Android's system file picker. The account action dialog gains an export entry, an import entry appears below Add account, imported credentials are re-encrypted through Android Keystore, and regression tests cover incorrect passwords, file tampering, and plaintext leakage.
 

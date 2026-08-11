@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Optional existing Release tag to verify, for example kemo-v1.1.2"
+        description: "Optional existing Release tag to verify, for example kemo-v1.1.3"
         required: false
         type: string
   release:
