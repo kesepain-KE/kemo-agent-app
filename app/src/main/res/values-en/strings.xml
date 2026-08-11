@@ -95,7 +95,7 @@
     <string name="security">Security</string>
     <string name="auto_lock">Lock after 5 minutes in background</string>
     <string name="about">About</string>
-    <string name="version">Version 1.1.0</string>
+    <string name="version">Version 1.1.1</string>
     <string name="version_details">Version details</string>
     <string name="main_version">Main version</string>
     <string name="core_version">Core version</string>

@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.0-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.1-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -187,7 +187,9 @@ No matter which entry point you use, it connects to the same agent, the same his
 
 ## Current status
 
-Current version: `1.1.0` (versionCode 2)
+Current version: `1.1.1` (versionCode 3)
+
+`1.1.1` is a small stability update: once an account has been saved, the local App UI remains accessible even if the remote session has expired, with an additional direct-entry action on the connection screen; a successful connect-and-save operation now returns to the main screen automatically; accounts support independent display names and local renaming; replacing a custom image or video background takes effect immediately; and empty file or perception collections from a clean framework no longer turn response-envelope metadata into phantom blank cards. This release also adds parser regression tests and keeps release-version consistency checks aligned.
 
 `1.1.0` brings a round of experience upgrades on top of 1.0: the chat screen now renders math formulas and media cards, lets you stop generation, regenerate the previous reply, and send guidance while the agent is responding; a background poller pushes a notification when the reply completes; the settings screen lets you pick an image or video as the global background; task and module cards open a full detail sheet on tap; file previews extend to audio, video, and PDF; the model picker in the configuration screen becomes searchable; and a new About page checks GitHub Releases and installs new versions right inside the app.
 
