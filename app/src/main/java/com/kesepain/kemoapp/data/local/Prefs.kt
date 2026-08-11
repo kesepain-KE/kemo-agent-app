@@ -24,6 +24,26 @@ data class AccountConfig(
     val displayName: String = "",
 )
 
+@Serializable
+data class AccountChatState(
+    val historyJson: String = "[]",
+    val sessionId: String = "",
+)
+
+internal fun resolveAccountChatState(
+    accountId: String,
+    states: Map<String, AccountChatState>,
+    legacyOwner: String,
+    legacyHistory: String,
+    legacySessionId: String,
+): AccountChatState {
+    states[accountId]?.let { return it }
+    if (accountId.isNotBlank() && (legacyOwner.isBlank() || legacyOwner == accountId)) {
+        return AccountChatState(legacyHistory.ifBlank { "[]" }, legacySessionId)
+    }
+    return AccountChatState()
+}
+
 data class AppPreferences(
     val accounts: List<AccountConfig> = emptyList(),
     val currentAccountId: String = "",
@@ -46,17 +66,29 @@ data class AppPreferences(
 class Prefs(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true }
     val flow: Flow<AppPreferences> = context.kemoDataStore.data.map { values ->
+        val accounts = runCatching { json.decodeFromString<List<AccountConfig>>(values[ACCOUNTS] ?: "[]") }.getOrDefault(emptyList())
+        val currentAccountId = values[CURRENT_ACCOUNT].orEmpty()
+        val chatStates = runCatching {
+            json.decodeFromString<Map<String, AccountChatState>>(values[ACCOUNT_CHAT_STATES] ?: "{}")
+        }.getOrDefault(emptyMap())
+        val currentChat = resolveAccountChatState(
+            accountId = currentAccountId,
+            states = chatStates,
+            legacyOwner = values[LEGACY_CHAT_ACCOUNT].orEmpty(),
+            legacyHistory = values[CHAT_HISTORY] ?: "[]",
+            legacySessionId = values[CHAT_SESSION_ID].orEmpty(),
+        )
         AppPreferences(
-            accounts = runCatching { json.decodeFromString<List<AccountConfig>>(values[ACCOUNTS] ?: "[]") }.getOrDefault(emptyList()),
-            currentAccountId = values[CURRENT_ACCOUNT].orEmpty(),
+            accounts = accounts,
+            currentAccountId = currentAccountId,
             themeMode = values[THEME_MODE] ?: "system",
             tone = values[TONE] ?: "Purple",
             language = values[LANGUAGE] ?: "system",
             notifications = values[NOTIFICATIONS] ?: true,
             dynamicColor = values[DYNAMIC_COLOR] ?: false,
             biometricEnabled = values[BIOMETRIC_ENABLED] ?: false,
-            chatHistoryJson = values[CHAT_HISTORY] ?: "[]",
-            chatSessionId = values[CHAT_SESSION_ID].orEmpty(),
+            chatHistoryJson = currentChat.historyJson,
+            chatSessionId = currentChat.sessionId,
             autoLockMinutes = values[AUTO_LOCK] ?: 5,
             widgetPending = values[WIDGET_PENDING] ?: 0,
             widgetLatest = values[WIDGET_LATEST].orEmpty(),
@@ -84,13 +116,41 @@ class Prefs(private val context: Context) {
             }.getOrDefault(emptyList())
             val remaining = current.filterNot { it.id == id }
             values[ACCOUNTS] = json.encodeToString(remaining)
+            val chatStates = runCatching {
+                json.decodeFromString<Map<String, AccountChatState>>(values[ACCOUNT_CHAT_STATES] ?: "{}")
+            }.getOrDefault(emptyMap()).toMutableMap()
+            chatStates.remove(id)
+            values[ACCOUNT_CHAT_STATES] = json.encodeToString(chatStates)
+            if (values[LEGACY_CHAT_ACCOUNT] == id) {
+                values.remove(LEGACY_CHAT_ACCOUNT)
+                values.remove(CHAT_HISTORY)
+                values.remove(CHAT_SESSION_ID)
+            }
             if (values[CURRENT_ACCOUNT] == id) {
                 values[CURRENT_ACCOUNT] = remaining.firstOrNull()?.id.orEmpty()
             }
         }
     }
 
-    suspend fun setCurrentAccount(id: String) = set(CURRENT_ACCOUNT, id)
+    suspend fun setCurrentAccount(id: String) {
+        context.kemoDataStore.edit { values ->
+            val previous = values[CURRENT_ACCOUNT].orEmpty()
+            val legacyOwner = values[LEGACY_CHAT_ACCOUNT].orEmpty()
+            if (previous.isNotBlank() && legacyOwner.isBlank()) {
+                val legacyHistory = values[CHAT_HISTORY] ?: "[]"
+                val legacySessionId = values[CHAT_SESSION_ID].orEmpty()
+                if (legacyHistory != "[]" || legacySessionId.isNotBlank()) {
+                    val states = runCatching {
+                        json.decodeFromString<Map<String, AccountChatState>>(values[ACCOUNT_CHAT_STATES] ?: "{}")
+                    }.getOrDefault(emptyMap()).toMutableMap()
+                    states.putIfAbsent(previous, AccountChatState(legacyHistory, legacySessionId))
+                    values[ACCOUNT_CHAT_STATES] = json.encodeToString(states)
+                    values[LEGACY_CHAT_ACCOUNT] = previous
+                }
+            }
+            values[CURRENT_ACCOUNT] = id
+        }
+    }
     suspend fun setThemeMode(value: String) = set(THEME_MODE, value)
     suspend fun setTone(value: String) = set(TONE, value)
     suspend fun setToneAndDisableDynamicColor(value: String) {
@@ -142,8 +202,15 @@ class Prefs(private val context: Context) {
         }
     }
 
-    suspend fun saveChatState(historyJson: String, sessionId: String) {
+    suspend fun saveChatState(accountId: String, historyJson: String, sessionId: String) {
+        if (accountId.isBlank()) return
         context.kemoDataStore.edit { values ->
+            val states = runCatching {
+                json.decodeFromString<Map<String, AccountChatState>>(values[ACCOUNT_CHAT_STATES] ?: "{}")
+            }.getOrDefault(emptyMap()).toMutableMap()
+            states[accountId] = AccountChatState(historyJson, sessionId)
+            values[ACCOUNT_CHAT_STATES] = json.encodeToString(states)
+            values[LEGACY_CHAT_ACCOUNT] = accountId
             values[CHAT_HISTORY] = historyJson
             values[CHAT_SESSION_ID] = sessionId
         }
@@ -164,6 +231,8 @@ class Prefs(private val context: Context) {
         private val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
         private val CHAT_HISTORY = stringPreferencesKey("chat_history")
         private val CHAT_SESSION_ID = stringPreferencesKey("session_id")
+        private val ACCOUNT_CHAT_STATES = stringPreferencesKey("account_chat_states")
+        private val LEGACY_CHAT_ACCOUNT = stringPreferencesKey("legacy_chat_account")
         private val AUTO_LOCK = intPreferencesKey("auto_lock_minutes")
         private val WIDGET_PENDING = intPreferencesKey("widget_pending")
         private val WIDGET_LATEST = stringPreferencesKey("widget_latest")
