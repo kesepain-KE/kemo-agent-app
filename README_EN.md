@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.1-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.2-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -187,7 +187,9 @@ No matter which entry point you use, it connects to the same agent, the same his
 
 ## Current status
 
-Current version: `1.1.1` (versionCode 3)
+Current version: `1.1.2` (versionCode 4)
+
+`1.1.2` adds password-encrypted `.kemoaccount` file import and export to account management. Exported files use PBKDF2-HMAC-SHA256 key derivation and AES-256-GCM authenticated encryption and are read or written only through Android's system file picker. The account action dialog gains an export entry, an import entry appears below Add account, imported credentials are re-encrypted through Android Keystore, and regression tests cover incorrect passwords, file tampering, and plaintext leakage.
 
 `1.1.1` is a small stability update: once an account has been saved, the local App UI remains accessible even if the remote session has expired, with an additional direct-entry action on the connection screen; a successful connect-and-save operation now returns to the main screen automatically; accounts support independent display names and local renaming; replacing a custom image or video background takes effect immediately; and empty file or perception collections from a clean framework no longer turn response-envelope metadata into phantom blank cards. This release also adds parser regression tests and keeps release-version consistency checks aligned.
 

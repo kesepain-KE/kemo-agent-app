@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.1-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.2-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -186,9 +186,11 @@ kemo-agent-app 并不试图替代网页端或命令行。
 
 ## 当前状态
 
-当前版本：`1.1.1`（versionCode 3）
+当前版本：`1.1.2`（versionCode 4）
 
-`1.1.1` 是一轮小幅稳定性更新：保存过账号后，即使远端会话过期也可以先进入 App 内部，并可在连接页直接进入；连接并保存成功后会自动回到主界面；账号支持独立名称与本地重命名；再次更换自定义图片或视频背景会立即刷新；全新框架返回空文件或空感知集合时，不再把响应元数据误显示为不存在的空白卡片。本次版本同时补充了对应的解析回归测试与发布版本一致性校验。
+`1.1.2` 在账号管理中新增密码加密的 `.kemoaccount` 文件导入与导出：导出文件使用 PBKDF2-HMAC-SHA256 派生密钥与 AES-256-GCM 认证加密，只通过 Android 系统文件选择器读写；账号操作弹窗新增导出入口，“添加账号”下方新增导入入口；导入后的凭据会重新交由 Android Keystore 加密保存，并补充错误密码、文件篡改与明文泄露回归测试。
+
+`1.1.1` 是一轮小幅稳定性更新：保存过账号后，即使远端会话过期也可以先进入 App 内部，并可在连接页直接进入；连接并保存成功后会自动回到主界面；账号支持独立名称与本地重命名；再次更换自定义图片或视频背景会立即刷新；全新框架返回空文件或空感知集合时，不再把响应元数据误显示为不存在的空白卡片。本次版本同时补充了空集合解析与发布版本一致性校验。
 
 `1.1.0` 在 1.0 的基础上带来一轮体验升级：聊天页支持数学公式渲染与媒体卡片，可以随时停止生成、重新回复上一轮，并能在回复期间继续发送引导；后台轮询会在回复完成时推送通知；设置页可挑选图片或视频作为全局背景；任务与模块卡片点击即可查看完整详情；文件预览扩展到音频、视频与 PDF；配置页的模型选择换成可搜索的选择器；App 内新增关于页，可直接检查 GitHub Releases 并下载安装新版本。
 
