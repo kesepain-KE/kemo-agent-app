@@ -68,12 +68,12 @@ class Prefs(private val context: Context) {
 
     suspend fun snapshot(): AppPreferences = flow.first()
 
-    suspend fun saveAccount(account: AccountConfig) {
+    suspend fun saveAccount(account: AccountConfig, makeCurrent: Boolean = true) {
         context.kemoDataStore.edit { values ->
             val current = runCatching { json.decodeFromString<List<AccountConfig>>(values[ACCOUNTS] ?: "[]") }.getOrDefault(emptyList())
             val updated = current.filterNot { it.id == account.id } + account
             values[ACCOUNTS] = json.encodeToString(updated)
-            values[CURRENT_ACCOUNT] = account.id
+            if (makeCurrent || values[CURRENT_ACCOUNT].isNullOrBlank()) values[CURRENT_ACCOUNT] = account.id
         }
     }
 

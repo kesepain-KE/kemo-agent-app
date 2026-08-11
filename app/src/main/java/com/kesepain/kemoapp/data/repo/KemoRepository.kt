@@ -10,6 +10,8 @@ import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import androidx.core.content.FileProvider
 import com.kesepain.kemoapp.data.local.AccountConfig
+import com.kesepain.kemoapp.data.local.AccountTransferCodec
+import com.kesepain.kemoapp.data.local.AccountTransferPayload
 import com.kesepain.kemoapp.data.local.Prefs
 import com.kesepain.kemoapp.data.local.SecureStore
 import com.kesepain.kemoapp.data.remote.ApiBundle
@@ -181,6 +183,72 @@ class KemoRepository(private val context: Context) {
     suspend fun secrets(accountId: String): ApiSecrets {
         val credentials = credentialState(accountId)
         return ApiSecrets(credentials.deviceToken, credentials.sessionToken)
+    }
+
+    suspend fun exportAccount(accountId: String, password: CharArray): ByteArray = withContext(Dispatchers.IO) {
+        val account = prefs.snapshot().accounts.firstOrNull { it.id == accountId }
+            ?: error("account not found")
+        val credentials = credentialState(accountId)
+        AccountTransferCodec.encrypt(
+            AccountTransferPayload(
+                displayName = account.displayName,
+                baseUrl = account.baseUrl,
+                username = account.username,
+                deviceToken = credentials.deviceToken,
+                userPassword = credentials.userPassword,
+                sessionToken = credentials.sessionToken,
+                sessionExpiresAt = credentials.sessionExpiresAt,
+                exportedAt = System.currentTimeMillis() / 1000,
+            ),
+            password,
+        )
+    }
+
+    suspend fun importAccount(fileBytes: ByteArray, password: CharArray): AccountConfig = withContext(Dispatchers.IO) {
+        val payload = AccountTransferCodec.decrypt(fileBytes, password)
+        val baseUrl = payload.baseUrl.trim().trimEnd('/')
+        val username = payload.username.trim()
+        require(baseUrl.startsWith("http://") || baseUrl.startsWith("https://")) { "invalid server address" }
+        require(username.isNotBlank()) { "invalid account username" }
+        val account = AccountConfig(
+            id = accountId(baseUrl, username),
+            baseUrl = baseUrl,
+            username = username,
+            displayName = payload.displayName.trim(),
+        )
+        val snapshot = prefs.snapshot()
+        val hasCredentials = payload.deviceToken.isNotBlank() ||
+            payload.userPassword.isNotBlank() ||
+            payload.sessionToken.isNotBlank()
+        if (hasCredentials) {
+            val now = System.currentTimeMillis() / 1000
+            val values = mutableMapOf(
+                SecureStore.REMEMBER_CREDENTIALS to true.toString(),
+                SecureStore.CREDENTIALS_EXPIRE_AT to (now + MAX_CREDENTIAL_AGE_SECONDS).toString(),
+            )
+            payload.deviceToken.takeIf(String::isNotBlank)?.let { values[SecureStore.DEVICE_TOKEN] = it }
+            payload.userPassword.takeIf(String::isNotBlank)?.let { values[SecureStore.USER_PASSWORD] = it }
+            if (payload.sessionToken.isNotBlank() && payload.sessionExpiresAt > now) {
+                values[SecureStore.SESSION_TOKEN] = payload.sessionToken
+                values[SecureStore.SESSION_EXPIRES_AT] = payload.sessionExpiresAt.toString()
+            }
+            secure.update(
+                account.id,
+                values = values,
+                remove = setOf(
+                    SecureStore.DEVICE_TOKEN,
+                    SecureStore.USER_PASSWORD,
+                    SecureStore.SESSION_TOKEN,
+                    SecureStore.SESSION_EXPIRES_AT,
+                    SecureStore.REMEMBER_CREDENTIALS,
+                    SecureStore.CREDENTIALS_EXPIRE_AT,
+                ),
+            )
+        }
+        // Keep the user's current account when importing into an existing list;
+        // a first imported account becomes current so the App remains usable.
+        prefs.saveAccount(account, makeCurrent = snapshot.accounts.isEmpty())
+        account
     }
 
     suspend fun appPasswordConfigured(accountId: String): Boolean = secure.get(accountId, SecureStore.APP_PASSWORD_HASH).isNotBlank()
