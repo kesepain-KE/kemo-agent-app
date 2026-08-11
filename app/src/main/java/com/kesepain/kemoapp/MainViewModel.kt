@@ -406,7 +406,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     try {
-                        repo.streamChat(prompt, sessionId, assistantId, pendingAttachments.map { it.path }, reasoningEffort) { event ->
+                        repo.streamChat(
+                            prompt,
+                            sessionId,
+                            assistantId,
+                            "app_$deviceId".take(128),
+                            pendingAttachments.map { it.path },
+                            reasoningEffort,
+                        ) { event ->
                             if (event is StreamEvent.Error) streamFailed = true
                             events.trySend(event)
                         }

@@ -426,14 +426,14 @@ class KemoRepository(private val context: Context) {
         return call { it.patchConfig(body) }
     }
 
-    suspend fun streamChat(prompt: String, sessionId: String, runId: String, uploadedFiles: List<String>, reasoningEffort: String, onEvent: (StreamEvent) -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun streamChat(prompt: String, sessionId: String, runId: String, clientId: String, uploadedFiles: List<String>, reasoningEffort: String, onEvent: (StreamEvent) -> Unit) = withContext(Dispatchers.IO) {
         val (_, bundle) = bundle()
         val parser = ChatStreamParser()
         val body = ChatRequestDto(
             sessionId = sessionId,
             prompt = prompt,
             runId = runId,
-            clientId = "kemo-android",
+            clientId = clientId,
             uploadedFiles = uploadedFiles,
             reasoningEffort = reasoningEffort,
         )
