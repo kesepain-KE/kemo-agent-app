@@ -58,6 +58,9 @@ fun ModelPickerField(
     models: List<String>,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    placeholder: String? = null,
+    pickerTitle: String? = null,
+    allowCustomValue: Boolean = true,
     onSelected: (String) -> Unit,
 ) {
     var showPicker by remember { mutableStateOf(false) }
@@ -69,7 +72,7 @@ fun ModelPickerField(
             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
         ) {
             Text(
-                selected.ifBlank { stringResource(R.string.choose_model) },
+                selected.ifBlank { placeholder ?: stringResource(R.string.choose_model) },
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -101,7 +104,7 @@ fun ModelPickerField(
                 Modifier.fillMaxWidth().heightIn(min = 420.dp, max = 680.dp).padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(stringResource(R.string.model_picker_title), style = MaterialTheme.typography.headlineSmall)
+                Text(pickerTitle ?: stringResource(R.string.model_picker_title), style = MaterialTheme.typography.headlineSmall)
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -116,7 +119,7 @@ fun ModelPickerField(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         val typed = query.trim()
-                        if (typed.isNotBlank() && available.none { it.equals(typed, ignoreCase = true) }) {
+                        if (allowCustomValue && typed.isNotBlank() && available.none { it.equals(typed, ignoreCase = true) }) {
                             item(key = "typed:$typed") {
                                 Card(
                                     onClick = { onSelected(typed); showPicker = false },
