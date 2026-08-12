@@ -5,12 +5,16 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.view.WindowManager
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ChatBubbleOutline
@@ -21,6 +25,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarDuration
@@ -37,6 +43,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -56,6 +64,8 @@ import com.kesepain.kemoapp.R
 import com.kesepain.kemoapp.ui.screens.chat.ChatScreen
 import com.kesepain.kemoapp.ui.screens.connect.ConnectScreen
 import com.kesepain.kemoapp.ui.screens.config.AgentConfigScreen
+import com.kesepain.kemoapp.ui.screens.config.UserConfigDraft
+import com.kesepain.kemoapp.ui.screens.config.reasoningEffortOptions
 import com.kesepain.kemoapp.ui.screens.files.FilesScreen
 import com.kesepain.kemoapp.ui.screens.modules.ModulesScreen
 import com.kesepain.kemoapp.ui.screens.settings.AppAboutScreen
@@ -92,6 +102,13 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
     val route = entry?.destination?.route.orEmpty()
     val mainRoute = tabs.any { it.route == route }
     val backgroundActive = state.preferences.themeBackgroundUri.isNotBlank()
+    val reasoning = reasoningEffortOptions(state.agentConfig, state.modelCapabilities)
+    LaunchedEffect(state.agentConfig) {
+        val draft = UserConfigDraft.from(state.agentConfig)
+        if (draft.providerType.equals("kemo", ignoreCase = true) && draft.model.isNotBlank()) {
+            viewModel.loadModelCapabilities(draft.model)
+        }
+    }
     LaunchedEffect(route) { if (route != "connect") editingAccountId = null }
     DisposableEffect(route, window) {
         window?.setSoftInputMode(
@@ -115,32 +132,78 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
             )
         }
     }
-    Scaffold(
-        containerColor = if (backgroundActive) Color.Transparent else MaterialTheme.colorScheme.surface,
-        // Let the chat drawer render behind the status bar. ChatScreen applies the safe inset to
-        // its actual content, while the drawer sheet and scrim remain truly edge-to-edge.
-        contentWindowInsets = if (route == "chat") WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            if (mainRoute) NavigationBar(
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = if (backgroundActive) MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f) else MaterialTheme.colorScheme.surfaceContainer,
-            ) {
-                Spacer(Modifier.width(16.dp))
-                tabs.forEach { tab ->
-                    NavigationBarItem(
-                        selected = route == tab.route,
-                        onClick = { navController.navigate(tab.route) { popUpTo(navController.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true } },
-                        icon = { Icon(tab.icon, null) },
-                        label = { Text(stringResource(tab.label)) },
-                    )
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val useNavigationRail = maxWidth >= 840.dp
+        val contentMaxWidth = 960.dp
+        val navigationContainer = if (backgroundActive) {
+            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainer
+        }
+        Scaffold(
+            containerColor = if (backgroundActive) Color.Transparent else MaterialTheme.colorScheme.surface,
+            // Let the chat drawer render behind the status bar. ChatScreen applies the safe inset to
+            // its actual content, while the drawer sheet and scrim remain truly edge-to-edge.
+            contentWindowInsets = if (route == "chat") WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            bottomBar = {
+                if (mainRoute && !useNavigationRail) NavigationBar(
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = navigationContainer,
+                ) {
+                    Spacer(Modifier.width(16.dp))
+                    tabs.forEach { tab ->
+                        NavigationBarItem(
+                            selected = route == tab.route,
+                            onClick = { navController.navigate(tab.route) { popUpTo(navController.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true } },
+                            icon = { Icon(tab.icon, null) },
+                            label = { Text(stringResource(tab.label)) },
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
                 }
-                Spacer(Modifier.width(16.dp))
-            }
-        },
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            NavHost(navController, startDestination = if (initialTask) "tasks" else "chat", modifier = Modifier.fillMaxSize()) {
+            },
+        ) { padding ->
+            Row(Modifier.fillMaxSize().padding(padding)) {
+                if (mainRoute && useNavigationRail) {
+                    NavigationRail(
+                        modifier = Modifier.fillMaxHeight(),
+                        containerColor = navigationContainer,
+                    ) {
+                        Spacer(Modifier.weight(1f))
+                        tabs.forEach { tab ->
+                            NavigationRailItem(
+                                selected = route == tab.route,
+                                onClick = { navController.navigate(tab.route) { popUpTo(navController.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true } },
+                                icon = { Icon(tab.icon, null) },
+                                label = { Text(stringResource(tab.label)) },
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+                Box(
+                    // ModalNavigationDrawer positions its closed sheet just outside its own
+                    // bounds. On a large screen the navigation rail shifts this content host
+                    // to the right, so without clipping a strip of the closed history sheet can
+                    // leak behind the rail. Keep route overlays inside the content pane.
+                    modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds(),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    NavHost(
+                        navController,
+                        startDestination = if (initialTask) "tasks" else "chat",
+                        // The chat host must span the entire pane beside the navigation rail.
+                        // Constraining the NavHost itself left an extra vertical "window" on
+                        // both sides and also confined the history drawer/scrim to the centered
+                        // 1120 dp area. Chat already controls the readable width of its own
+                        // bubbles, so let its canvas and overlays use the full tablet pane.
+                        modifier = if (route == "chat") {
+                            Modifier.fillMaxSize()
+                        } else {
+                            Modifier.fillMaxHeight().widthIn(max = contentMaxWidth)
+                        },
+                    ) {
             composable("chat") {
                 key(state.preferences.currentAccountId) {
                     ChatScreen(
@@ -149,6 +212,11 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                         state.status,
                         state.streaming,
                         state.chatClosed,
+                        reasoning.selected,
+                        reasoning.options,
+                        reasoning.available,
+                        "reasoning-effort" in pendingKeys || "refresh:model-capabilities" in pendingKeys,
+                        viewModel::setReasoningEffort,
                         viewModel::loadConversations,
                         viewModel::switchConversation,
                         viewModel::deleteConversation,
@@ -266,10 +334,13 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                 AgentConfigScreen(
                     value = state.agentConfig,
                     models = state.models,
+                    modelCapabilities = state.modelCapabilities,
                     onRefresh = viewModel::loadAgentConfig,
-                    onModelsRefresh = viewModel::loadModels,
+                    onModelsRefresh = { viewModel.loadModels(true) },
+                    onCapabilitiesRefresh = viewModel::loadModelCapabilities,
                     busy = "config" in pendingKeys,
                     modelsRefreshing = "refresh:models" in pendingKeys,
+                    capabilitiesRefreshing = "refresh:model-capabilities" in pendingKeys,
                 ) { viewModel.patchAgentConfig(it.toChanges()) }
             }
             composable("versions") { VersionScreen(state.versions) }
@@ -319,10 +390,13 @@ fun KemoNav(state: AppUiState, viewModel: MainViewModel, initialTask: Boolean = 
                     onEnterDirectly = { navController.popBackStack() },
                     onRename = editingAccountId?.let { accountId -> { name -> viewModel.renameAccount(accountId, name) } },
                 )
-            }
+                    }
+                }
             }
         }
     }
+}
+
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {

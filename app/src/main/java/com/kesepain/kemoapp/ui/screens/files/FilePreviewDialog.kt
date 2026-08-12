@@ -39,7 +39,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -276,11 +275,28 @@ private fun renderPdfPage(file: File, pageIndex: Int): Bitmap? = runCatching {
     ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
         PdfRenderer(descriptor).use { renderer ->
             renderer.openPage(pageIndex.coerceIn(0, renderer.pageCount - 1)).use { page ->
-                Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888).also { bitmap ->
+                val scale = minOf(
+                    2f,
+                    MAX_PDF_RENDER_WIDTH.toFloat() / page.width.coerceAtLeast(1),
+                    MAX_PDF_RENDER_HEIGHT.toFloat() / page.height.coerceAtLeast(1),
+                    kotlin.math.sqrt(MAX_PDF_RENDER_PIXELS.toDouble() / (page.width.toDouble() * page.height.toDouble())).toFloat(),
+                ).coerceAtLeast(0.1f)
+                val width = (page.width * scale).toInt().coerceAtLeast(1)
+                val height = (page.height * scale).toInt().coerceAtLeast(1)
+                Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
                     bitmap.eraseColor(android.graphics.Color.WHITE)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.render(
+                        bitmap,
+                        null,
+                        android.graphics.Matrix().apply { setScale(scale, scale) },
+                        PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                    )
                 }
             }
         }
     }
 }.getOrNull()
+
+private const val MAX_PDF_RENDER_WIDTH = 2160
+private const val MAX_PDF_RENDER_HEIGHT = 3840
+private const val MAX_PDF_RENDER_PIXELS = 8_000_000L
