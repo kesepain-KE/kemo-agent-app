@@ -103,7 +103,7 @@
     <string name="security">Security</string>
     <string name="auto_lock">Lock after 5 minutes in background</string>
     <string name="about">About</string>
-    <string name="version">Version 1.1.3</string>
+    <string name="version">Version 1.1.4</string>
     <string name="version_details">Version details</string>
     <string name="main_version">Main version</string>
     <string name="core_version">Core version</string>
@@ -232,6 +232,11 @@
     <string name="api_key">API Key</string>
     <string name="api_key_unchanged">Leave blank to keep the current key</string>
     <string name="reasoning_effort">Reasoning effort</string>
+    <string name="reasoning_effort_hint_chat">The Chat protocol uses five standard reasoning efforts saved per account.</string>
+    <string name="reasoning_effort_hint_kemo">Kemo options are provided dynamically by the selected model’s capability declaration.</string>
+    <string name="reasoning_effort_loading">Loading model reasoning capabilities…</string>
+    <string name="reasoning_effort_unavailable">Reasoning effort unavailable</string>
+    <string name="feedback_reasoning_effort_updated">Reasoning effort updated</string>
     <string name="streaming_output">Streaming output</string>
     <string name="support_image_input">Main model supports images</string>
     <string name="support_audio_input">Main model supports audio</string>
@@ -360,6 +365,7 @@
     <string name="context_fixed_snapshot">Uses a fixed snapshot for this round</string>
     <string name="context_token_overview">Token usage overview</string>
     <string name="context_runtime_estimate">Runtime estimate</string>
+    <string name="context_data_unavailable">—</string>
     <string name="context_system_prompt">System prompt</string>
     <string name="context_tool_definitions">Tool definitions</string>
     <string name="context_conversation_summary">Conversation and summary</string>
@@ -413,6 +419,7 @@
     <string name="feedback_account_import_failed">Account import failed. Check the file and encryption password</string>
     <string name="feedback_account_export_failed">Account export failed. Check the password and save location</string>
     <string name="feedback_account_switch_busy">Wait for the current operation to finish before switching accounts</string>
+    <string name="feedback_account_reconnect_required">The saved credentials for this account could not restore the connection. Edit the account and reconnect</string>
     <string name="feedback_theme_restored">Theme restored</string>
     <string name="about_project_information">Project information</string>
     <string name="about_app_ui_version">App UI version</string>
@@ -484,4 +491,13 @@
     <string name="media_video_preview_failed">Video preview is not supported on this device. Download it and open it with a system player.</string>
     <string name="generated_media">Generated media</string>
     <string name="tool_elapsed">Elapsed %1$s</string>
+    <string name="device_action_channel">Device actions</string>
+    <string name="device_action_request_title">Kemo wants to operate this device</string>
+    <string name="device_action_alarm_title">Set system alarm</string>
+    <string name="device_action_timer_title">Start system timer</string>
+    <string name="device_action_calendar_title">Create calendar event</string>
+    <string name="device_action_todo_title">Create to-do</string>
+    <string name="device_action_alarm_summary">%1$02d:%2$02d · %3$s</string>
+    <string name="device_action_timer_summary">%1$d seconds · %2$s</string>
+    <string name="device_action_continue">Continue</string>
 </resources>

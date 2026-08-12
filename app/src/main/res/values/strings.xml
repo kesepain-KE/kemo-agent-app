@@ -103,7 +103,7 @@
     <string name="security">安全</string>
     <string name="auto_lock">后台 5 分钟自动锁定</string>
     <string name="about">关于</string>
-    <string name="version">版本 1.1.3</string>
+    <string name="version">版本 1.1.4</string>
     <string name="version_details">版本详情</string>
     <string name="main_version">主版本</string>
     <string name="core_version">核心版本</string>
@@ -232,6 +232,11 @@
     <string name="api_key">API Key</string>
     <string name="api_key_unchanged">留空则保留现有密钥</string>
     <string name="reasoning_effort">思考强度</string>
+    <string name="reasoning_effort_hint_chat">Chat 协议使用标准五档思考强度，并按当前账号保存。</string>
+    <string name="reasoning_effort_hint_kemo">Kemo 协议的可选档位由当前模型的能力声明动态提供。</string>
+    <string name="reasoning_effort_loading">正在读取模型思考能力…</string>
+    <string name="reasoning_effort_unavailable">思考强度不可用</string>
+    <string name="feedback_reasoning_effort_updated">思考强度已更新</string>
     <string name="streaming_output">流式输出</string>
     <string name="support_image_input">主模型支持图片输入</string>
     <string name="support_audio_input">主模型支持音频输入</string>
@@ -360,6 +365,7 @@
     <string name="context_fixed_snapshot">本轮使用固定快照</string>
     <string name="context_token_overview">Token 占用概览</string>
     <string name="context_runtime_estimate">运行时估算</string>
+    <string name="context_data_unavailable">—</string>
     <string name="context_system_prompt">系统提示词</string>
     <string name="context_tool_definitions">工具定义</string>
     <string name="context_conversation_summary">对话与摘要</string>
@@ -413,6 +419,7 @@
     <string name="feedback_account_import_failed">账号导入失败，请检查文件和加密密码</string>
     <string name="feedback_account_export_failed">账号导出失败，请检查密码和保存位置</string>
     <string name="feedback_account_switch_busy">当前操作完成后才能切换账号</string>
+    <string name="feedback_account_reconnect_required">该账号的保存凭据无法恢复连接，请编辑账号后重新连接</string>
     <string name="feedback_theme_restored">主题已恢复</string>
     <string name="about_project_information">项目信息</string>
     <string name="about_app_ui_version">App UI 版本</string>
@@ -484,4 +491,13 @@
     <string name="media_video_preview_failed">视频暂不支持在此设备上预览，请下载后使用系统播放器打开</string>
     <string name="generated_media">生成的媒体</string>
     <string name="tool_elapsed">耗时 %1$s</string>
+    <string name="device_action_channel">设备操作</string>
+    <string name="device_action_request_title">智能体请求操作设备</string>
+    <string name="device_action_alarm_title">设置系统闹钟</string>
+    <string name="device_action_timer_title">启动系统倒计时</string>
+    <string name="device_action_calendar_title">创建日历日程</string>
+    <string name="device_action_todo_title">创建待办</string>
+    <string name="device_action_alarm_summary">%1$02d:%2$02d · %3$s</string>
+    <string name="device_action_timer_summary">%1$d 秒 · %2$s</string>
+    <string name="device_action_continue">继续</string>
 </resources>

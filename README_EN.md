@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.3-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.4-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -187,7 +187,9 @@ No matter which entry point you use, it connects to the same agent, the same his
 
 ## Current status
 
-Current version: `1.1.3` (versionCode 5)
+Current version: `1.1.4` (versionCode 6)
+
+`1.1.4` strengthens multi-account and device collaboration. Switching accounts now restores the target account's own App conversation and chat progress, while WebSockets, background notifications, and pending result reports remain account-scoped. The global `kemo_app` extension gains a single targetable device-action protocol, and the App initially supports system alarms, timers, calendar events, and to-dos through a strict action allowlist, TTLs, an idempotent state machine, and explicit user confirmation instead of arbitrary Intents or silent system writes. This release also adds OnePlus/ColorOS calendar compatibility, offline result recovery, and per-device capability reporting.
 
 `1.1.3` focuses on the in-App update pipeline: it fixes `kemo-v` Release tags being mistaken for the installed version, adds a five-minute check cache with an official GitHub Release-page fallback when the API is rate-limited, and provides GitHub-first downloads with four built-in mirrors for manual selection and automatic failover. Before installation, every APK must pass the official GitHub SHA-256, package-name, version, and app-signature checks, while the UI reports the active source, progress, and verification result.
 

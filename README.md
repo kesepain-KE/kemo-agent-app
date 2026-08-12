@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.3-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.4-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -186,7 +186,9 @@ kemo-agent-app 并不试图替代网页端或命令行。
 
 ## 当前状态
 
-当前版本：`1.1.3`（versionCode 5）
+当前版本：`1.1.4`（versionCode 6）
+
+`1.1.4` 完善多账号与设备协作链路：账号切换会恢复目标账号自己的 App 会话与聊天进度，WebSocket、后台通知和待上报结果均按账号隔离；全局 `kemo_app` 拓展新增统一、可定向的设备操作协议，App 首批安全接入系统闹钟、倒计时、日历日程和待办，并通过动作白名单、有效期、幂等状态机与用户确认界面阻止任意 Intent 或静默系统写入。该版本同时补充 OnePlus/ColorOS 日历兼容、离线结果恢复和多设备能力上报。
 
 `1.1.3` 集中优化 App 内更新链路：修复 `kemo-v` Release 标签被误判为当前版本的问题；增加五分钟检查缓存，并在 GitHub API 限流时降级到 GitHub 官方 Release 网页；下载采用 GitHub 官方优先，提供四个预装镜像手动选择与自动故障切换；安装前必须通过 GitHub SHA-256、APK 包名、版本号和应用签名校验，同时展示实际下载源、进度与校验结果。
 
