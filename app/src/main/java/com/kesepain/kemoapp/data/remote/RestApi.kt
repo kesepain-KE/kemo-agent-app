@@ -33,7 +33,10 @@ interface RestApi {
     @POST("v1/cron") suspend fun createCron(@Body body: RequestBody): Response<ResponseBody>
     @PUT("v1/cron/{id}") suspend fun updateCron(@Path("id") id: String, @Body body: RequestBody): Response<ResponseBody>
     @DELETE("v1/cron/{id}") suspend fun deleteCron(@Path("id") id: String): Response<ResponseBody>
-    @GET("v1/status") suspend fun status(@Query("session_id") sessionId: String = ""): Response<ResponseBody>
+    @GET("v1/status") suspend fun status(
+        @Query("session_id") sessionId: String = "",
+        @Query("client_id") clientId: String = "",
+    ): Response<ResponseBody>
     @GET("v1/expands") suspend fun expands(): Response<ResponseBody>
     @GET("v1/expands/data") suspend fun expandsData(): Response<ResponseBody>
     @GET("v1/senses") suspend fun senses(): Response<ResponseBody>
@@ -49,7 +52,8 @@ interface RestApi {
     @DELETE("v1/files") suspend fun deleteFile(@Query("scope") scope: String, @Query("path") path: String): Response<ResponseBody>
     @GET("v1/knowledge") suspend fun knowledge(): Response<ResponseBody>
     @GET("v1/knowledge/search") suspend fun knowledgeSearch(@Query("q") query: String): Response<ResponseBody>
-    @GET("v1/models") suspend fun models(): Response<ResponseBody>
+    @GET("v1/models") suspend fun models(@Query("refresh") refresh: Boolean = false): Response<ResponseBody>
+    @GET("v1/models/capabilities") suspend fun modelCapabilities(@Query("model") model: String, @Query("refresh") refresh: Boolean = false): Response<ResponseBody>
     @PUT("v1/provider/model") suspend fun setModel(@Body body: RequestBody): Response<ResponseBody>
     @GET("v1/config") suspend fun config(): Response<ResponseBody>
     @retrofit2.http.PATCH("v1/config") suspend fun patchConfig(@Body body: RequestBody): Response<ResponseBody>

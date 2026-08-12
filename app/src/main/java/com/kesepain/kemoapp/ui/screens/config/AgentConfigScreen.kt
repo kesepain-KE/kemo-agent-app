@@ -38,10 +38,13 @@ import kotlinx.serialization.json.JsonElement
 fun AgentConfigScreen(
     value: JsonElement?,
     models: JsonElement?,
+    modelCapabilities: JsonElement?,
     onRefresh: () -> Unit,
     onModelsRefresh: () -> Unit,
+    onCapabilitiesRefresh: (String, Boolean) -> Unit,
     busy: Boolean = false,
     modelsRefreshing: Boolean = false,
+    capabilitiesRefreshing: Boolean = false,
     onSave: (UserConfigDraft) -> Unit,
 ) {
     var draft by remember { mutableStateOf(UserConfigDraft.from(value)) }
@@ -53,12 +56,28 @@ fun AgentConfigScreen(
             listOf(draft.model, draft.agentDefault, draft.agentCheap, draft.agentReasoning) +
             draft.multimodal.values
         ).filter(String::isNotBlank).distinct()
+    val reasoning = reasoningEffortOptions(
+        protocol = draft.providerType,
+        model = draft.model,
+        configuredEffort = draft.reasoningEffort,
+        capabilities = modelCapabilities,
+    )
     LaunchedEffect(value) {
         val loaded = UserConfigDraft.from(value)
         draft = loaded
         if (loaded.providerType.equals("kemo", ignoreCase = true)) onModelsRefresh()
     }
     LaunchedEffect(Unit) { onRefresh() }
+    LaunchedEffect(savedProviderType, draft.model) {
+        if (savedProviderType.equals("kemo", ignoreCase = true) && draft.model.isNotBlank()) {
+            onCapabilitiesRefresh(draft.model, false)
+        }
+    }
+    LaunchedEffect(reasoning.options, reasoning.selected) {
+        if (reasoning.available && reasoning.selected.isNotBlank() && draft.reasoningEffort != reasoning.selected) {
+            draft = draft.copy(reasoningEffort = reasoning.selected)
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -86,6 +105,21 @@ fun AgentConfigScreen(
                     selected = draft.model,
                     models = modelNames,
                 ) { draft = draft.copy(model = it) }
+                ModelPickerField(
+                    label = stringResource(R.string.reasoning_effort),
+                    selected = reasoning.selected,
+                    models = reasoning.options,
+                    enabled = reasoning.available && !capabilitiesRefreshing,
+                    pickerTitle = stringResource(R.string.reasoning_effort),
+                    allowCustomValue = false,
+                    placeholder = stringResource(
+                        when {
+                            capabilitiesRefreshing -> R.string.reasoning_effort_loading
+                            reasoning.available -> R.string.reasoning_effort
+                            else -> R.string.reasoning_effort_unavailable
+                        },
+                    ),
+                ) { draft = draft.copy(reasoningEffort = it) }
                 if (draft.providerType.equals("kemo", ignoreCase = true)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -95,11 +129,30 @@ fun AgentConfigScreen(
                             modifier = Modifier.weight(1f),
                         )
                         LoadingOutlinedButton(
-                            onClick = onModelsRefresh,
+                            onClick = {
+                                onModelsRefresh()
+                                if (draft.model.isNotBlank()) onCapabilitiesRefresh(draft.model, true)
+                            },
                             enabled = savedProviderType.equals("kemo", ignoreCase = true),
                             loading = modelsRefreshing,
                         ) { Text(stringResource(R.string.refresh)) }
                     }
+                    Text(
+                        text = when {
+                            capabilitiesRefreshing -> stringResource(R.string.reasoning_effort_loading)
+                            reasoning.available -> stringResource(R.string.reasoning_effort_hint_kemo)
+                            reasoning.warning.isNotBlank() -> reasoning.warning
+                            else -> stringResource(R.string.reasoning_effort_unavailable)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        stringResource(R.string.reasoning_effort_hint_chat),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 ConfigTextField(stringResource(R.string.base_url), draft.baseUrl) { draft = draft.copy(baseUrl = it) }
                 OutlinedTextField(

@@ -46,6 +46,7 @@ data class UserConfigDraft(
             put("base_url", baseUrl)
             if (apiKey.isNotBlank()) put("api_key", apiKey)
             put("stream", stream)
+            put("reasoning_effort", reasoningEffort)
             put("input_modalities", buildJsonArray {
                 add(JsonPrimitive("text"))
                 if (imageInput) add(JsonPrimitive("image"))
