@@ -204,7 +204,7 @@ def validate_apk_values(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="repository root")
-    parser.add_argument("--expected-tag", default="", help="release tag, for example v1.1.3")
+    parser.add_argument("--expected-tag", default="", help="release tag, for example kemo-v1.1.4")
     parser.add_argument("--metadata", type=Path, help="Gradle output-metadata.json to verify")
     parser.add_argument("--apk-version-name", default="", help="versionName read from a released APK")
     parser.add_argument("--apk-version-code", default="", help="versionCode read from a released APK")

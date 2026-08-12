@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Optional existing Release tag to verify, for example kemo-v1.1.3"
+        description: "Optional existing Release tag to verify, for example kemo-v1.1.4"
         required: false
         type: string
   release:
@@ -58,7 +58,13 @@ jobs:
         run: python scripts/release_contract.py --expected-tag "$EXPECTED_RELEASE_TAG"
 
       - name: Run Android tests, lint and build
-        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain
+        run: >-
+          ./gradlew
+          :app:testDebugUnitTest
+          :app:lintDebug
+          :app:assembleDebug
+          :app:assembleRelease
+          --console=plain
 
       - name: Verify built APK metadata
         run: >-
