@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
@@ -156,6 +157,11 @@ fun ChatScreen(
     status: JsonElement?,
     streaming: Boolean,
     chatClosed: Boolean,
+    reasoningEffort: String,
+    reasoningEffortOptions: List<String>,
+    reasoningEffortAvailable: Boolean,
+    reasoningEffortBusy: Boolean,
+    onReasoningEffortChange: (String) -> Unit,
     onLoadHistory: () -> Unit,
     onSelectConversation: (String) -> Unit,
     onDeleteConversation: (String) -> Unit,
@@ -183,7 +189,6 @@ fun ChatScreen(
     onDownloadAttachment: (String) -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
-    var reasoningEffort by rememberSaveable { mutableStateOf("medium") }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -211,17 +216,12 @@ fun ChatScreen(
     val statusRoot = status as? JsonObject
     val runtimeContext = statusRoot.obj("runtime").obj("context")
     val overviewContext = statusRoot.obj("overview").obj("context")
-    val overviewWindow = statusRoot.obj("overview").obj("context_window").obj("tokens")
-    val reportedContextPercent = runtimeContext.decimal("percent")
-        ?: overviewWindow.decimal("percent")
-        ?: 0.0
-    val contextCapacity = runtimeContext.long("max_tokens")
-        ?: overviewWindow.long("capacity_tokens")
-        ?: overviewContext.long("limit")
-        ?: 0L
     val localTokenEstimate = entries.asReversed().firstNotNullOfOrNull { it.usage?.totalTokens } ?: 0
-    val contextPercent = reportedContextPercent.takeIf { it > 0.0 }
-        ?: if (contextCapacity > 0L) localTokenEstimate.toDouble() / contextCapacity * 100.0 else 0.0
+    val tokenSnapshot = contextTokenSnapshot(
+        status = status,
+    )
+    val contextCapacity = tokenSnapshot.capacityTokens
+    val contextPercent = tokenSnapshot.percent
     val reportedRounds = runtimeContext.long("rounds") ?: overviewContext.long("rounds") ?: 0L
     val localRounds = entries.count { it.role == ChatRole.USER && (it.text.isNotBlank() || it.attachments.isNotEmpty()) }.toLong()
     val rounds = maxOf(reportedRounds, localRounds)
@@ -276,7 +276,14 @@ fun ChatScreen(
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
-            ModalDrawerSheet(drawerShape = RectangleShape, windowInsets = WindowInsets(0, 0, 0, 0)) {
+            // Give the sheet a stable width. If it is allowed to wrap its (sometimes empty)
+            // history content, wide-screen layouts can measure a very narrow drawer and leave
+            // its edge visible even while DrawerValue is Closed.
+            ModalDrawerSheet(
+                modifier = Modifier.width(360.dp),
+                drawerShape = RectangleShape,
+                windowInsets = WindowInsets(0, 0, 0, 0),
+            ) {
                 Row(
                     Modifier.fillMaxWidth().statusBarsPadding().padding(start = 18.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -327,8 +334,10 @@ fun ChatScreen(
                     }
                     ReasoningEffortPicker(
                         value = reasoningEffort,
-                        enabled = !streaming,
-                        onValueChange = { reasoningEffort = it },
+                        options = reasoningEffortOptions,
+                        enabled = !streaming && reasoningEffortAvailable && !reasoningEffortBusy,
+                        loading = reasoningEffortBusy,
+                        onValueChange = onReasoningEffortChange,
                     )
                     IconButton(onClick = { onLoadHistory(); scope.launch { drawer.open() } }) {
                         Icon(Icons.Default.History, stringResource(R.string.history))
@@ -431,6 +440,7 @@ fun ChatScreen(
                 fallbackContextPercent = contextPercent,
                 fallbackContextCapacity = contextCapacity,
                 fallbackContextUsed = localTokenEstimate.toLong(),
+                tokenSnapshot = tokenSnapshot,
             )
         }
     }
@@ -563,11 +573,11 @@ private fun ContextDetailsContent(
     fallbackContextPercent: Double,
     fallbackContextCapacity: Long,
     fallbackContextUsed: Long,
+    tokenSnapshot: ContextTokenSnapshotUi,
 ) {
     val overview = root.obj("overview")
     val runtime = root.obj("runtime")
     val window = overview.obj("context_window")
-    val tokens = window.obj("tokens")
     val conversation = window.obj("conversation")
     val tasks = window.obj("tasks")
     val capabilities = window.obj("capabilities")
@@ -578,15 +588,17 @@ private fun ContextDetailsContent(
     val runtimeContext = runtime.obj("context")
 
     val sessionId = runtime.text("session_id").ifBlank { overview.text("session_id") }
-    val systemTokens = tokens.long("system_prompt_tokens") ?: 0L
-    val toolTokens = tokens.long("tool_schema_tokens") ?: 0L
-    val conversationTokens = (tokens.long("conversation_tokens") ?: 0L) + (tokens.long("summary_tokens") ?: 0L)
-    val breakdownTotal = systemTokens + toolTokens + conversationTokens + (tokens.long("other_tokens") ?: 0L)
-    val reportedTotal = tokens.long("context_tokens") ?: runtimeContext.long("used_tokens") ?: 0L
-    val totalTokens = maxOf(breakdownTotal, reportedTotal).takeIf { it > 0L } ?: fallbackContextUsed
-    val capacityTokens = (tokens.long("capacity_tokens") ?: runtimeContext.long("max_tokens") ?: 0L)
-        .takeIf { it > 0L } ?: fallbackContextCapacity
-    val percent = tokens.decimal("percent") ?: runtimeContext.decimal("percent") ?: fallbackContextPercent
+    val systemTokens = tokenSnapshot.systemPromptTokens
+    val toolTokens = tokenSnapshot.toolSchemaTokens
+    val conversationTokens = tokenSnapshot.conversationTokens + tokenSnapshot.summaryTokens
+    // An explicit context_snapshot is authoritative even when it reports that
+    // the selected server-side session is unavailable. Do not combine a stale
+    // local usage estimate with zero-valued API breakdown fields: that was the
+    // source of the misleading "72K total / 0 components" panel.
+    val totalTokens = if (tokenSnapshot.available) tokenSnapshot.totalTokens else 0L
+    val capacityTokens = tokenSnapshot.capacityTokens.takeIf { it > 0L } ?: fallbackContextCapacity
+    val percent = if (tokenSnapshot.available) tokenSnapshot.percent else 0.0
+    val unavailableValue = stringResource(R.string.context_data_unavailable)
 
     val foregroundRounds = conversation.long("foreground_rounds")
         ?: runtimeContext.long("rounds")
@@ -633,16 +645,19 @@ private fun ContextDetailsContent(
     ) {
         ContextMetricGrid(
             listOf(
-                ContextMetricUi(stringResource(R.string.context_system_prompt), formatCompactCount(systemTokens), "Token"),
-                ContextMetricUi(stringResource(R.string.context_tool_definitions), formatCompactCount(toolTokens), "Token"),
-                ContextMetricUi(stringResource(R.string.context_conversation_summary), formatCompactCount(conversationTokens), "Token"),
-                ContextMetricUi(stringResource(R.string.context_current_total), formatCompactCount(totalTokens), "Token"),
+                ContextMetricUi(stringResource(R.string.context_system_prompt), if (tokenSnapshot.available) formatCompactCount(systemTokens) else unavailableValue, if (tokenSnapshot.available) "Token" else ""),
+                ContextMetricUi(stringResource(R.string.context_tool_definitions), if (tokenSnapshot.available) formatCompactCount(toolTokens) else unavailableValue, if (tokenSnapshot.available) "Token" else ""),
+                ContextMetricUi(stringResource(R.string.context_conversation_summary), if (tokenSnapshot.available) formatCompactCount(conversationTokens) else unavailableValue, if (tokenSnapshot.available) "Token" else ""),
+                ContextMetricUi(stringResource(R.string.context_current_total), if (tokenSnapshot.available) formatCompactCount(totalTokens) else unavailableValue, if (tokenSnapshot.available) "Token" else ""),
                 ContextMetricUi(stringResource(R.string.context_capacity_limit), formatCompactCount(capacityTokens), "Token"),
             ),
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(stringResource(R.string.context_capacity), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(stringResource(R.string.status_percent_value, percent), style = MaterialTheme.typography.labelLarge)
+            Text(
+                if (tokenSnapshot.available) stringResource(R.string.status_percent_value, percent) else unavailableValue,
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
         ContextProgressBar(percent)
     }
@@ -1317,7 +1332,9 @@ private fun ToolDetailBlock(label: String, value: String) {
 @Composable
 private fun ReasoningEffortPicker(
     value: String,
+    options: List<String>,
     enabled: Boolean,
+    loading: Boolean,
     onValueChange: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -1326,10 +1343,13 @@ private fun ReasoningEffortPicker(
             selected = true,
             onClick = { expanded = true },
             enabled = enabled,
-            label = { Text(value) },
+            label = {
+                if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text(value.ifBlank { stringResource(R.string.reasoning_effort_unavailable) })
+            },
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            listOf("minimal", "low", "medium", "high", "max").forEach { effort ->
+            options.forEach { effort ->
                 DropdownMenuItem(
                     text = { Text(effort) },
                     onClick = { expanded = false; onValueChange(effort) },
