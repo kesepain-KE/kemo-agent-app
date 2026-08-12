@@ -9,6 +9,12 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import android.os.Build
+import com.kesepain.kemoapp.device.DeviceCapabilityRegistry
 
 class EventSocket(
     private val scope: CoroutineScope,
@@ -18,6 +24,7 @@ class EventSocket(
     private val sessionToken: String,
     private val deviceId: String,
     private val onEvent: (EventDto) -> Unit,
+    private val onOpen: () -> Unit = {},
 ) {
     private var socket: WebSocket? = null
     private var retryJob: Job? = null
@@ -27,6 +34,18 @@ class EventSocket(
     fun start() { stopped = false; connect() }
     fun stop() { stopped = true; retryJob?.cancel(); socket?.close(1000, "app stopped") }
 
+    fun sendDeviceResult(commandId: String, status: String, detail: Map<String, String> = emptyMap()): Boolean {
+        val payload = buildJsonObject {
+            put("type", "device.command.result")
+            put("data", buildJsonObject {
+                put("command_id", commandId)
+                put("status", status)
+                put("detail", JsonObject(detail.mapValues { (_, value) -> kotlinx.serialization.json.JsonPrimitive(value) }))
+            })
+        }
+        return socket?.send(ApiClient.json.encodeToString(payload)) == true
+    }
+
     private fun connect() {
         val request = Request.Builder().url(url.replaceFirst("http://", "ws://").replaceFirst("https://", "wss://").trimEnd('/') + "/v1/ws")
             .header("Authorization", "Bearer $deviceToken")
@@ -34,7 +53,11 @@ class EventSocket(
             .header("X-Kemo-Device-Id", deviceId)
             .build()
         socket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) { attempt = 0 }
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                attempt = 0
+                webSocket.send(ApiClient.json.encodeToString(DeviceCapabilityRegistry.payload()))
+                onOpen()
+            }
             override fun onMessage(webSocket: WebSocket, text: String) {
                 runCatching { ApiClient.json.decodeFromString<EventDto>(text) }.onSuccess {
                     if (it.type == "ping") webSocket.send("{\"type\":\"pong\"}") else onEvent(it)

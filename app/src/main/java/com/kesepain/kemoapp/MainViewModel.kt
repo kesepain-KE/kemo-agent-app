@@ -31,6 +31,9 @@ import com.kesepain.kemoapp.data.stream.ChatUsageUi
 import com.kesepain.kemoapp.data.stream.GuidanceStatus
 import com.kesepain.kemoapp.data.stream.StreamEvent
 import com.kesepain.kemoapp.data.stream.ToolStatus
+import com.kesepain.kemoapp.device.DeviceActionCommand
+import com.kesepain.kemoapp.device.DeviceActionCoordinator
+import com.kesepain.kemoapp.device.DeviceActionReporter
 import com.kesepain.kemoapp.security.UnlockManager
 import com.kesepain.kemoapp.update.AppAboutUiState
 import com.kesepain.kemoapp.update.AppDownloadSource
@@ -125,6 +128,7 @@ data class AppUiState(
     val generatedFiles: JsonElement? = null,
     val knowledge: JsonElement? = null,
     val models: JsonElement? = null,
+    val modelCapabilities: JsonElement? = null,
     val agentConfig: JsonElement? = null,
     val avatarBytes: ByteArray? = null,
     val versions: JsonElement? = null,
@@ -167,6 +171,15 @@ private fun conversationTarget(payload: JsonElement): ConversationTarget? {
         state = (session["state"] as? JsonPrimitive)?.contentOrNull.orEmpty().ifBlank { "open" },
         rounds = (session["rounds"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.coerceAtLeast(0) ?: 0,
     )
+}
+
+private fun statusSessionId(payload: JsonElement): String {
+    val root = payload as? JsonObject ?: return ""
+    fun objectText(parent: String, key: String): String =
+        (((root[parent] as? JsonObject)?.get(key)) as? JsonPrimitive)?.contentOrNull.orEmpty()
+    return (root["resolved_session_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        .ifBlank { objectText("overview", "session_id") }
+        .ifBlank { objectText("runtime", "session_id") }
 }
 
 private fun latestOpenConversationTarget(payload: JsonElement): ConversationTarget? {
@@ -253,6 +266,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             generatedFiles = null,
                             knowledge = null,
                             models = null,
+                            modelCapabilities = null,
                             agentConfig = null,
                             avatarBytes = null,
                             versions = null,
@@ -288,11 +302,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch { unlockManager.unlocked.collectLatest { unlocked -> _state.update { it.copy(unlocked = unlocked) }; if (unlocked) startSocket() } }
-        repo.onSessionExpired = { viewModelScope.launch {
-            currentAccount()?.let { repo.clearSession(it.id) }
-            eventSocket?.stop()
-            _state.update { it.copy(configured = false, error = "会话已过期，请重新连接") }
-        } }
+        repo.onSessionExpired = { expiredAccountId ->
+            viewModelScope.launch {
+                repo.clearSession(expiredAccountId)
+                if (_state.value.preferences.currentAccountId == expiredAccountId) {
+                    eventSocket?.stop()
+                    _state.update { it.copy(configured = false, error = "会话已过期，请重新连接") }
+                }
+            }
+        }
     }
 
     fun enterAppDirectly() {
@@ -865,6 +883,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             loadTasksInternal()
             loadStatusInternal()
             loadModulesInternal()
+            loadAgentConfigInternal()
         }
     }
 
@@ -878,8 +897,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loadFileDirectory("upload", directory, 1)
     }
     fun loadKnowledge() = viewModelScope.launch { loadValue({ repo.knowledge() }) { value -> copy(knowledge = value) } }
-    fun loadModels() = launchBusy("refresh:models") { loadValue({ repo.models() }) { value -> copy(models = value) } }
-    fun loadAgentConfig() = launchBusy("refresh:config") { loadValue({ repo.config() }) { value -> copy(agentConfig = value) } }
+    fun loadModels(refresh: Boolean = false) = launchBusy("refresh:models") { loadValue({ repo.models(refresh) }) { value -> copy(models = value) } }
+    fun loadAgentConfig() = launchBusy("refresh:config") { loadAgentConfigInternal() }
+    fun loadModelCapabilities(model: String, refresh: Boolean = false) {
+        val normalized = model.trim()
+        if (normalized.isBlank()) {
+            _state.update { it.copy(modelCapabilities = null) }
+            return
+        }
+        val loadedModel = ((_state.value.modelCapabilities as? JsonObject)?.get("model") as? JsonPrimitive)
+            ?.contentOrNull.orEmpty()
+        if (!refresh && loadedModel == normalized) return
+        launchBusy("refresh:model-capabilities") {
+            loadValue({ repo.modelCapabilities(normalized, refresh) }) { value ->
+                copy(modelCapabilities = value)
+            }
+        }
+    }
     fun loadProfileData() = viewModelScope.launch {
         val requestContext = accountRequestContext()
         runCatching { repo.avatar() to repo.version() }
@@ -947,22 +981,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         persistChatNow(accountId)
+        loadAgentConfigForAccount(accountId, expectedEpoch)
         loadStatusForAccount(accountId, target.sessionId, expectedEpoch)
         loadConversationsForAccount(accountId, expectedEpoch)
     }
 
     private suspend fun loadStatusForAccount(accountId: String, sessionId: String, expectedEpoch: Long) {
-        runCatching { repo.status(sessionId) }.onSuccess { value ->
+        runCatching { repo.status(sessionId, "app_$deviceId".take(128)) }.onSuccess { value ->
             if (_state.value.preferences.currentAccountId == accountId && accountEpoch == expectedEpoch) {
-                _state.update { it.copy(status = value, error = "") }
+                applyAuthoritativeStatus(value, accountId, expectedEpoch)
             }
         }
+    }
+
+    private suspend fun applyAuthoritativeStatus(
+        value: JsonElement,
+        accountId: String,
+        expectedEpoch: Long,
+    ) {
+        if (_state.value.preferences.currentAccountId != accountId || accountEpoch != expectedEpoch) return
+        val resolvedSessionId = statusSessionId(value)
+        val currentSessionId = _state.value.chatSessionId
+        if (resolvedSessionId.isBlank() || resolvedSessionId == currentSessionId) {
+            _state.update { it.copy(status = value, error = "") }
+            return
+        }
+        val resolvedEntries = runCatching {
+            parseHistoryMessages(
+                repo.conversationMessages(resolvedSessionId),
+                resolvedSessionId,
+            )
+        }.getOrNull().orEmpty()
+        if (_state.value.preferences.currentAccountId != accountId || accountEpoch != expectedEpoch) return
+        _state.update {
+            it.copy(
+                chatEntries = resolvedEntries.takeLast(100),
+                chatSessionId = resolvedSessionId,
+                chatClosed = false,
+                status = value,
+                error = "",
+            )
+        }
+        persistChatNow(accountId)
     }
 
     private suspend fun loadConversationsForAccount(accountId: String, expectedEpoch: Long) {
         runCatching { repo.conversations() }.onSuccess { value ->
             if (_state.value.preferences.currentAccountId == accountId && accountEpoch == expectedEpoch) {
                 _state.update { it.copy(conversations = value, error = "") }
+            }
+        }
+    }
+
+    private suspend fun loadAgentConfigForAccount(accountId: String, expectedEpoch: Long) {
+        runCatching { repo.config() }.onSuccess { value ->
+            if (_state.value.preferences.currentAccountId == accountId && accountEpoch == expectedEpoch) {
+                _state.update { it.copy(agentConfig = value, modelCapabilities = null, error = "") }
             }
         }
     }
@@ -1097,6 +1171,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun searchKnowledge(query: String) = viewModelScope.launch { loadValue({ repo.searchKnowledge(query) }) { value -> copy(knowledge = value) } }
     fun selectModel(model: String) = launchBusy("model", R.string.feedback_model_switched) { repo.setModel(model); loadModels() }
     fun patchAgentConfig(changes: JsonObject) = launchBusy("config", R.string.feedback_config_saved) { repo.patchConfig(changes); loadAgentConfig() }
+    fun setReasoningEffort(effort: String) {
+        val normalized = effort.trim()
+        if (normalized.isBlank()) return
+        launchBusy("reasoning-effort", R.string.feedback_reasoning_effort_updated) {
+            repo.patchConfig(
+                kotlinx.serialization.json.buildJsonObject {
+                    put("provider", kotlinx.serialization.json.buildJsonObject {
+                        put("reasoning_effort", JsonPrimitive(normalized))
+                    })
+                },
+            )
+            loadAgentConfigInternal()
+            loadStatusInternal()
+        }
+    }
 
     fun deleteAccount(id: String) {
         viewModelScope.launch {
@@ -1188,6 +1277,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 generatedFiles = null,
                 knowledge = null,
                 models = null,
+                modelCapabilities = null,
                 agentConfig = null,
                 avatarBytes = null,
                 versions = null,
@@ -1203,8 +1293,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 prefs.saveChatState(outgoingAccountId, outgoingHistory, outgoingSessionId)
             }
             eventSocket?.stop()
-            prefs.setCurrentAccount(id)
-            unlockManager.lock()
+            runCatching { repo.ensureAccountSession(id) }
+                .onSuccess {
+                    prefs.setCurrentAccount(id)
+                    if (repo.appPasswordConfigured(id)) {
+                        unlockManager.lock()
+                    } else {
+                        unlockManager.unlock()
+                        startSocket()
+                    }
+                }
+                .onFailure {
+                    val message = getApplication<Application>().getString(R.string.feedback_account_reconnect_required)
+                    // The target was never published as current, so restore the full
+                    // outgoing account UI instead of leaving a blank/disconnected chat.
+                    _state.value = snapshot.copy(error = message)
+                    _messages.emit(UiMessage(message, UiMessageType.Error))
+                    unlockManager.unlock()
+                    startSocket()
+                }
         }
         return true
     }
@@ -1321,7 +1428,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun loadStatusInternal() = loadValue({ repo.status(_state.value.chatSessionId) }) { value -> copy(status = value) }
+    private suspend fun loadStatusInternal() {
+        val requestContext = accountRequestContext()
+        val sessionId = _state.value.chatSessionId
+        runCatching { repo.status(sessionId, "app_$deviceId".take(128)) }
+            .onSuccess { value ->
+                if (isCurrentAccountRequest(requestContext)) {
+                    applyAuthoritativeStatus(value, requestContext.accountId, requestContext.epoch)
+                }
+            }
+            .onFailure {
+                if (isCurrentAccountRequest(requestContext)) {
+                    _state.update { state ->
+                        state.copy(error = getApplication<Application>().getString(R.string.error_generic))
+                    }
+                }
+            }
+    }
+    private suspend fun loadAgentConfigInternal() = loadValue({ repo.config() }) { value -> copy(agentConfig = value) }
     private suspend fun loadConversationsInternal() = loadValue({ repo.conversations() }) { value -> copy(conversations = value) }
     private suspend fun loadModulesInternal() {
         val requestContext = accountRequestContext()
@@ -1480,7 +1604,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (secrets.deviceToken.isBlank() || secrets.sessionToken.isBlank()) return
         val bundle = repo.bundle().second
         eventSocket?.stop()
-        eventSocket = EventSocket(
+        val socket = EventSocket(
             scope = viewModelScope,
             client = bundle.client,
             url = account.baseUrl,
@@ -1490,10 +1614,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             onEvent = { event ->
                 if (_state.value.preferences.currentAccountId == account.id) onEvent(event)
             },
-        ).also { it.start() }
+            onOpen = { DeviceActionReporter.flush(getApplication(), account.username, deviceId) },
+        )
+        eventSocket = socket
+        DeviceActionReporter.attach(account.username, deviceId) { commandId, status, detail ->
+            socket.sendDeviceResult(commandId, status, detail)
+        }
+        socket.start()
     }
 
     private fun onEvent(event: EventDto) {
+        if (event.type == "device.command") {
+            val command = runCatching {
+                ApiClient.json.decodeFromJsonElement(DeviceActionCommand.serializer(), event.data ?: return)
+            }.getOrNull() ?: return
+            val result = DeviceActionCoordinator.accept(getApplication(), command)
+            DeviceActionReporter.report(getApplication(), command, result)
+            return
+        }
         if (!_state.value.preferences.notifications || event.type == "connected") return
         val context = getApplication<Application>()
         val data = event.data as? JsonObject ?: JsonObject(emptyMap())
@@ -1589,7 +1727,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         NotificationManagerCompat.from(context).notify(requestCode, notification)
     }
 
-    override fun onCleared() { eventSocket?.stop(); super.onCleared() }
+    override fun onCleared() { DeviceActionReporter.detach(); eventSocket?.stop(); super.onCleared() }
 
     private fun parseHistoryMessages(payload: JsonElement, sessionId: String): List<ChatEntry> {
         val root = payload as? JsonObject
