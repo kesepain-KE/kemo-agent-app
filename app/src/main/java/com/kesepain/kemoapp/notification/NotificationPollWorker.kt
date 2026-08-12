@@ -27,7 +27,10 @@ class NotificationPollWorker(context: Context, params: WorkerParameters) : Corou
     override suspend fun doWork(): Result {
         val preferences = Prefs(applicationContext).snapshot()
         if (!preferences.notifications || preferences.currentAccountId.isBlank()) return Result.success()
-        val store = applicationContext.getSharedPreferences(STORE, Context.MODE_PRIVATE)
+        val store = applicationContext.getSharedPreferences(
+            "$STORE:${preferences.currentAccountId}",
+            Context.MODE_PRIVATE,
+        )
         val initialized = store.getBoolean(INITIALIZED, false)
         return runCatching {
             val repo = KemoRepository(applicationContext)

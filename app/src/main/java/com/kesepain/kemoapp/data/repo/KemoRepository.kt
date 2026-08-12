@@ -54,10 +54,11 @@ data class StoredCredentialState(
 class KemoRepository(private val context: Context) {
     private val prefs = Prefs(context)
     private val secure = SecureStore(context)
-    private var ephemeralCredentials: Pair<String, StoredCredentialState>? = null
+    /** Session-only credentials are isolated per account for in-process account switching. */
+    private val ephemeralCredentials = mutableMapOf<String, StoredCredentialState>()
 
-    /** 业务请求返回 401（会话过期/无效）时回调，由 ViewModel 处理登出 */
-    var onSessionExpired: (() -> Unit)? = null
+    /** 携带发起请求的账号 ID，避免切换期间旧请求误清除新账号会话。 */
+    var onSessionExpired: ((accountId: String) -> Unit)? = null
 
     suspend fun login(
         displayName: String,
@@ -67,6 +68,7 @@ class KemoRepository(private val context: Context) {
         password: String,
         appPassword: String,
         rememberCredentials: Boolean,
+        makeCurrent: Boolean = true,
     ): AccountConfig = withContext(Dispatchers.IO) {
         val account = AccountConfig(
             id = accountId(baseUrl, username),
@@ -91,7 +93,7 @@ class KemoRepository(private val context: Context) {
         val sessionExpiresAt = auth.expiresAt.takeIf { it > now } ?: (now + DEFAULT_SESSION_AGE_SECONDS)
         val credentialsExpireAt = if (rememberCredentials) now + MAX_CREDENTIAL_AGE_SECONDS else sessionExpiresAt
         if (rememberCredentials) {
-            synchronized(this@KemoRepository) { ephemeralCredentials = null }
+            synchronized(this@KemoRepository) { ephemeralCredentials.remove(account.id) }
             secure.update(
                 account.id,
                 values = mapOf(
@@ -105,7 +107,7 @@ class KemoRepository(private val context: Context) {
             )
         } else {
             synchronized(this@KemoRepository) {
-                ephemeralCredentials = account.id to StoredCredentialState(
+                ephemeralCredentials[account.id] = StoredCredentialState(
                     deviceToken = deviceToken,
                     sessionToken = auth.sessionToken,
                     rememberCredentials = false,
@@ -115,13 +117,14 @@ class KemoRepository(private val context: Context) {
             clearAuthentication(account.id)
         }
         if (appPassword.isNotBlank()) secure.put(account.id, SecureStore.APP_PASSWORD_HASH, sha256(appPassword))
-        prefs.saveAccount(account)
+        prefs.saveAccount(account, makeCurrent = makeCurrent)
         account
     }
 
-    suspend fun bundle(): Pair<AccountConfig, ApiBundle> {
+    suspend fun bundle(accountId: String? = null): Pair<AccountConfig, ApiBundle> {
         val snapshot = prefs.snapshot()
-        val account = snapshot.accounts.firstOrNull { it.id == snapshot.currentAccountId } ?: error("no configured account")
+        val targetAccountId = accountId ?: snapshot.currentAccountId
+        val account = snapshot.accounts.firstOrNull { it.id == targetAccountId } ?: error("no configured account")
         val credentials = credentialState(account.id)
         val device = credentials.deviceToken
         val session = credentials.sessionToken
@@ -131,13 +134,11 @@ class KemoRepository(private val context: Context) {
 
     suspend fun credentialState(accountId: String): StoredCredentialState {
         val now = System.currentTimeMillis() / 1000
-        synchronized(this) { ephemeralCredentials }
-            ?.takeIf { it.first == accountId }
-            ?.second
+        synchronized(this) { ephemeralCredentials[accountId] }
             ?.let { ephemeral ->
                 if (ephemeral.sessionExpiresAt > now) return ephemeral
                 synchronized(this) {
-                    if (ephemeralCredentials?.first == accountId) ephemeralCredentials = null
+                    ephemeralCredentials.remove(accountId)
                 }
             }
 
@@ -183,6 +184,46 @@ class KemoRepository(private val context: Context) {
     suspend fun secrets(accountId: String): ApiSecrets {
         val credentials = credentialState(accountId)
         return ApiSecrets(credentials.deviceToken, credentials.sessionToken)
+    }
+
+    /**
+     * Validates a saved account before publishing an in-App account switch. If the
+     * bridge has restarted and invalidated its in-memory session, remembered user
+     * credentials are used to obtain a fresh session without opening the edit page.
+     */
+    suspend fun ensureAccountSession(accountId: String): StoredCredentialState = withContext(Dispatchers.IO) {
+        val account = prefs.snapshot().accounts.firstOrNull { it.id == accountId }
+            ?: error("account not found")
+        val credentials = credentialState(accountId)
+        require(credentials.deviceToken.isNotBlank()) { "account requires login" }
+
+        if (credentials.sessionToken.isNotBlank()) {
+            val response = ApiClient.create(
+                account,
+                ApiSecrets(credentials.deviceToken, credentials.sessionToken),
+            ).rest.conversations(limit = 1)
+            val code = response.code()
+            response.body()?.close()
+            if (response.isSuccessful) return@withContext credentials
+            if (code != 401 && code != 403) error("session validation failed ($code)")
+        }
+
+        require(credentials.userPassword.isNotBlank()) { "account requires login" }
+        login(
+            displayName = account.displayName,
+            baseUrl = account.baseUrl,
+            deviceToken = credentials.deviceToken,
+            username = account.username,
+            password = credentials.userPassword,
+            appPassword = "",
+            rememberCredentials = true,
+            makeCurrent = false,
+        )
+        credentialState(accountId).also { refreshed ->
+            require(refreshed.deviceToken.isNotBlank() && refreshed.sessionToken.isNotBlank()) {
+                "account requires login"
+            }
+        }
     }
 
     suspend fun exportAccount(accountId: String, password: CharArray): ByteArray = withContext(Dispatchers.IO) {
@@ -255,7 +296,7 @@ class KemoRepository(private val context: Context) {
     suspend fun verifyAppPassword(accountId: String, value: String): Boolean = secure.get(accountId, SecureStore.APP_PASSWORD_HASH) == sha256(value)
     suspend fun deleteAccount(accountId: String) {
         synchronized(this) {
-            if (ephemeralCredentials?.first == accountId) ephemeralCredentials = null
+            ephemeralCredentials.remove(accountId)
         }
         secure.clear(
             accountId,
@@ -274,7 +315,7 @@ class KemoRepository(private val context: Context) {
 
     suspend fun clearSession(accountId: String) {
         synchronized(this) {
-            if (ephemeralCredentials?.first == accountId) ephemeralCredentials = null
+            ephemeralCredentials.remove(accountId)
         }
         val names = mutableSetOf(SecureStore.SESSION_TOKEN, SecureStore.SESSION_EXPIRES_AT)
         if (secure.get(accountId, SecureStore.REMEMBER_CREDENTIALS).toBooleanStrictOrNull() != true) {
@@ -329,7 +370,7 @@ class KemoRepository(private val context: Context) {
     suspend fun cancelRun(runId: String): JsonElement = call { it.cancelRun(runId) }
     suspend fun taskPlans(): JsonElement = call { it.taskPlans() }
     suspend fun cron(): JsonElement = call { it.cron() }
-    suspend fun status(sessionId: String = ""): JsonElement = call { it.status(sessionId) }
+    suspend fun status(sessionId: String = "", clientId: String = ""): JsonElement = call { it.status(sessionId, clientId) }
     suspend fun expands(): JsonElement = call { it.expands() }
     suspend fun expandsData(): JsonElement = call { it.expandsData() }
     suspend fun senses(): JsonElement = call { it.senses() }
@@ -358,21 +399,21 @@ class KemoRepository(private val context: Context) {
             }
         }
         val part = MultipartBody.Part.createFormData("file", safeName, body)
-        val (_, bundle) = bundle()
+        val (account, bundle) = bundle()
         val response = bundle.rest.uploadFile(directory.trim('/'), part)
         val text = response.body()?.string().orEmpty()
         if (!response.isSuccessful) {
-            if (response.code() == 401) onSessionExpired?.invoke()
+            if (response.code() == 401 || response.code() == 403) onSessionExpired?.invoke(account.id)
             error("upload failed (${response.code()})")
         }
         if (text.isBlank()) JsonObject(emptyMap()) else ApiClient.json.parseToJsonElement(text)
     }
 
     suspend fun cacheChatMedia(path: String, name: String, scope: String = "download"): String = withContext(Dispatchers.IO) {
-        val (_, bundle) = bundle()
+        val (account, bundle) = bundle()
         val response = bundle.rest.downloadFile(scope = scope, path = path)
         if (!response.isSuccessful) {
-            if (response.code() == 401) onSessionExpired?.invoke()
+            if (response.code() == 401 || response.code() == 403) onSessionExpired?.invoke(account.id)
             error("media download failed (${response.code()})")
         }
         val body = response.body() ?: error("empty media response")
@@ -401,16 +442,17 @@ class KemoRepository(private val context: Context) {
     }
     suspend fun knowledge(): JsonElement = call { it.knowledge() }
     suspend fun searchKnowledge(query: String): JsonElement = call { it.knowledgeSearch(query) }
-    suspend fun models(): JsonElement = call { it.models() }
+    suspend fun models(refresh: Boolean = false): JsonElement = call { it.models(refresh) }
+    suspend fun modelCapabilities(model: String, refresh: Boolean = false): JsonElement = call { it.modelCapabilities(model, refresh) }
     suspend fun config(): JsonElement = call { it.config() }
     suspend fun version(): JsonElement = call { it.version() }
 
     suspend fun avatar(): ByteArray? = withContext(Dispatchers.IO) {
-        val (_, bundle) = bundle()
+        val (account, bundle) = bundle()
         val response = bundle.rest.avatar()
         if (response.code() == 204) return@withContext null
         if (!response.isSuccessful) {
-            if (response.code() == 401) onSessionExpired?.invoke()
+            if (response.code() == 401 || response.code() == 403) onSessionExpired?.invoke(account.id)
             error("avatar request failed (${response.code()})")
         }
         response.body()?.bytes()
@@ -426,16 +468,36 @@ class KemoRepository(private val context: Context) {
     }
     suspend fun deleteFile(scope: String, path: String): JsonElement = call { it.deleteFile(scope, path) }
     suspend fun previewFile(scope: String, path: String, name: String): FilePreviewPayload = withContext(Dispatchers.IO) {
-        val (_, bundle) = bundle()
+        val (account, bundle) = bundle()
         val response = bundle.rest.downloadFile(scope = scope, path = path)
-        if (!response.isSuccessful) error("preview failed (${response.code()})")
+        if (!response.isSuccessful) {
+            if (response.code() == 401 || response.code() == 403) onSessionExpired?.invoke(account.id)
+            error("preview failed (${response.code()})")
+        }
         val body = response.body() ?: error("empty preview")
-        FilePreviewPayload(name, body.contentType()?.toString().orEmpty(), body.bytes())
+        val declaredLength = body.contentLength()
+        require(declaredLength < 0L || declaredLength <= MAX_FILE_PREVIEW_BYTES) { "preview file is too large" }
+        val output = java.io.ByteArrayOutputStream()
+        body.byteStream().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0L
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                total += count
+                require(total <= MAX_FILE_PREVIEW_BYTES) { "preview file is too large" }
+                output.write(buffer, 0, count)
+            }
+        }
+        FilePreviewPayload(name, body.contentType()?.toString().orEmpty(), output.toByteArray())
     }
     suspend fun downloadFile(scope: String, path: String): String = withContext(Dispatchers.IO) {
-        val (_, bundle) = bundle()
+        val (account, bundle) = bundle()
         val response = bundle.rest.downloadFile(scope = scope, path = path)
-        if (!response.isSuccessful) error("download failed (${response.code()})")
+        if (!response.isSuccessful) {
+            if (response.code() == 401 || response.code() == 403) onSessionExpired?.invoke(account.id)
+            error("download failed (${response.code()})")
+        }
         val body = response.body() ?: error("empty download")
         val fileName = path.substringAfterLast('/').substringAfterLast('\\').ifBlank { "download.bin" }
         val mimeType = body.contentType()?.toString() ?: "application/octet-stream"
@@ -497,7 +559,7 @@ class KemoRepository(private val context: Context) {
     }
 
     suspend fun streamChat(prompt: String, sessionId: String, runId: String, clientId: String, uploadedFiles: List<String>, reasoningEffort: String, onEvent: (StreamEvent) -> Unit) = withContext(Dispatchers.IO) {
-        val (_, bundle) = bundle()
+        val (account, bundle) = bundle()
         val parser = ChatStreamParser()
         val body = ChatRequestDto(
             sessionId = sessionId,
@@ -516,7 +578,7 @@ class KemoRepository(private val context: Context) {
             .build()
         streamClient.newCall(ApiClient.chatRequest(bundle, body)).execute().use { response ->
             if (!response.isSuccessful) {
-                if (response.code == 401) onSessionExpired?.invoke()
+                if (response.code == 401 || response.code == 403) onSessionExpired?.invoke(account.id)
                 error("chat failed (${response.code})")
             }
             val source = response.body?.source() ?: error("empty chat stream")
@@ -554,11 +616,11 @@ class KemoRepository(private val context: Context) {
     }
 
     private suspend fun call(block: suspend (com.kesepain.kemoapp.data.remote.RestApi) -> retrofit2.Response<okhttp3.ResponseBody>): JsonElement {
-        val (_, bundle) = bundle()
+        val (account, bundle) = bundle()
         val response = block(bundle.rest)
         val text = response.body()?.string().orEmpty()
         if (!response.isSuccessful) {
-            if (response.code() == 401) onSessionExpired?.invoke()
+            if (response.code() == 401 || response.code() == 403) onSessionExpired?.invoke(account.id)
             error("request failed (${response.code()})")
         }
         return if (text.isBlank()) JsonObject(emptyMap()) else ApiClient.json.parseToJsonElement(text)
@@ -569,6 +631,7 @@ class KemoRepository(private val context: Context) {
         private const val DEFAULT_SESSION_AGE_SECONDS = 2L * 60L * 60L
         private const val MAX_UPLOAD_BYTES = 80L * 1024L * 1024L
         private const val MAX_CHAT_MEDIA_CACHE_BYTES = 200L * 1024L * 1024L
+        private const val MAX_FILE_PREVIEW_BYTES = 24L * 1024L * 1024L
         fun accountId(baseUrl: String, username: String) = sha256("${baseUrl.trimEnd('/')}|$username").take(20)
         fun flattenObjects(value: JsonElement): List<JsonObject> {
             val result = mutableListOf<JsonObject>()
