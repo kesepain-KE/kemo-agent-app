@@ -25,6 +25,7 @@ class EventSocket(
     private val deviceId: String,
     private val onEvent: (EventDto) -> Unit,
     private val onOpen: () -> Unit = {},
+    private val onAuthenticationFailed: () -> Unit = {},
 ) {
     private var socket: WebSocket? = null
     private var retryJob: Job? = null
@@ -64,8 +65,14 @@ class EventSocket(
                 }
             }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                // 403/401 = 鉴权失败（会话无效），自动重连无意义，停止重试等待用户重新连接
-                if (response?.code == 403 || response?.code == 401) { stop(); return }
+                // A bridge restart invalidates its in-memory sessions. Let the
+                // account layer refresh the saved session instead of requiring the
+                // user to open the account editor and save the same credentials.
+                if (response?.code == 403 || response?.code == 401) {
+                    stop()
+                    onAuthenticationFailed()
+                    return
+                }
                 reconnect()
             }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { if (!stopped) reconnect() }

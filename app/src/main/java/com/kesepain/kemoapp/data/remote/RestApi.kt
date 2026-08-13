@@ -21,8 +21,14 @@ interface RestApi {
     @GET("v1/conversations/active") suspend fun activeConversation(@Query("client_id") clientId: String): Response<ResponseBody>
     @DELETE("v1/conversations") suspend fun deleteAllConversations(): Response<ResponseBody>
     @GET("v1/conversations/{id}/messages") suspend fun conversationMessages(@Path("id") id: String, @Query("limit") limit: Int = 100): Response<ResponseBody>
-    @DELETE("v1/conversations/{id}") suspend fun deleteConversation(@Path("id") id: String): Response<ResponseBody>
-    @POST("v1/conversations/{id}/close") suspend fun closeConversation(@Path("id") id: String): Response<ResponseBody>
+    @DELETE("v1/conversations/{id}") suspend fun deleteConversation(
+        @Path("id") id: String,
+        @Query("client_id") clientId: String = "",
+    ): Response<ResponseBody>
+    @POST("v1/conversations/{id}/close") suspend fun closeConversation(
+        @Path("id") id: String,
+        @Query("client_id") clientId: String = "",
+    ): Response<ResponseBody>
     @POST("v1/conversations/{id}/compress") suspend fun compressConversation(@Path("id") id: String): Response<ResponseBody>
     @POST("v1/conversations/{id}/undo-last-round") suspend fun undoLastRound(@Path("id") id: String, @Body body: RequestBody): Response<ResponseBody>
     @POST("v1/guidance") suspend fun submitGuidance(@Body body: RequestBody): Response<ResponseBody>

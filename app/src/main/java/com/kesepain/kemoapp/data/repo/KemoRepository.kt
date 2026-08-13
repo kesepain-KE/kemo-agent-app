@@ -206,15 +206,20 @@ class KemoRepository(private val context: Context) {
             response.body()?.close()
             if (response.isSuccessful) return@withContext credentials
             if (code != 401 && code != 403) error("session validation failed ($code)")
+            // The bridge keeps sessions in process memory. A bridge/framework restart
+            // can therefore invalidate a locally unexpired session. Drop only that
+            // stale session before authenticating again with remembered credentials.
+            clearSession(accountId)
         }
 
-        require(credentials.userPassword.isNotBlank()) { "account requires login" }
+        val reconnectCredentials = credentialState(accountId)
+        require(reconnectCredentials.userPassword.isNotBlank()) { "account requires login" }
         login(
             displayName = account.displayName,
             baseUrl = account.baseUrl,
-            deviceToken = credentials.deviceToken,
+            deviceToken = reconnectCredentials.deviceToken,
             username = account.username,
-            password = credentials.userPassword,
+            password = reconnectCredentials.userPassword,
             appPassword = "",
             rememberCredentials = true,
             makeCurrent = false,
@@ -342,8 +347,10 @@ class KemoRepository(private val context: Context) {
     suspend fun activeConversation(clientId: String): JsonElement = call { it.activeConversation(clientId) }
     suspend fun deleteAllConversations(): JsonElement = call { it.deleteAllConversations() }
     suspend fun conversationMessages(id: String): JsonElement = call { it.conversationMessages(id) }
-    suspend fun deleteConversation(id: String): JsonElement = call { it.deleteConversation(id) }
-    suspend fun closeConversation(id: String): JsonElement = call { it.closeConversation(id) }
+    suspend fun deleteConversation(id: String, clientId: String = ""): JsonElement =
+        call { it.deleteConversation(id, clientId) }
+    suspend fun closeConversation(id: String, clientId: String = ""): JsonElement =
+        call { it.closeConversation(id, clientId) }
     suspend fun compressConversation(id: String): JsonElement = call { it.compressConversation(id) }
     suspend fun undoLastRound(id: String, expectedRound: Int, prompt: String): JsonElement {
         val body = ApiClient.json.encodeToString(

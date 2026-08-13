@@ -13,12 +13,16 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.kesepain.kemoapp.data.local.AccountConfig
 import com.kesepain.kemoapp.data.local.AccountTransferCodec
 import com.kesepain.kemoapp.data.local.AppPreferences
 import com.kesepain.kemoapp.data.local.Prefs
 import com.kesepain.kemoapp.data.local.SecureStore
+import com.kesepain.kemoapp.chat.ChatKeepAliveService
 import com.kesepain.kemoapp.data.remote.EventDto
 import com.kesepain.kemoapp.data.remote.EventSocket
 import com.kesepain.kemoapp.data.remote.ApiClient
@@ -197,7 +201,7 @@ private fun latestOpenConversationTarget(payload: JsonElement): ConversationTarg
     }.firstOrNull()
 }
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+class MainViewModel(application: Application) : AndroidViewModel(application), DefaultLifecycleObserver {
     private val prefs = Prefs(application)
     private val secure = SecureStore(application)
     private val repo = KemoRepository(application)
@@ -219,12 +223,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var observedAccountId: String? = null
     private var accountEpoch = 0L
     private var accountRestoreJob: Job? = null
+    private var reconnectingAccountId: String = ""
+    private var lastForegroundReconnectAt: Long = 0L
     private var chatJob: Job? = null
     private var persistChatJob: Job? = null
     private var pendingNextTurnGuidance: PendingNextTurnGuidance? = null
     private val recentNotifications = mutableMapOf<String, Long>()
 
     init {
+        ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         viewModelScope.launch {
             prefs.flow.collectLatest { values ->
                 val account = values.accounts.firstOrNull { it.id == values.currentAccountId }
@@ -285,11 +292,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         rememberCredentials = credentials?.rememberCredentials == true,
                     )
                 }
-                if (accountChanged && account != null && configured) {
+                if (accountChanged && account != null) {
                     val expectedEpoch = accountEpoch
-                    accountRestoreJob = viewModelScope.launch {
-                        restoreAccountChat(account.id, expectedEpoch)
-                    }
+                    scheduleAccountReconnect(account.id, expectedEpoch, reportFailure = false)
                 }
                 if (values.chatSessionId.isBlank() && _state.value.chatSessionId.isNotBlank()) {
                     persistChatNow(accountId)
@@ -307,9 +312,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 repo.clearSession(expiredAccountId)
                 if (_state.value.preferences.currentAccountId == expiredAccountId) {
                     eventSocket?.stop()
-                    _state.update { it.copy(configured = false, error = "会话已过期，请重新连接") }
+                    _state.update { it.copy(configured = false) }
+                    scheduleAccountReconnect(expiredAccountId, accountEpoch, reportFailure = true)
                 }
             }
+        }
+    }
+
+    /**
+     * Revalidates the selected account whenever the process returns to the foreground.
+     * The bridge keeps sessions in memory, so a framework/bridge restart can invalidate
+     * an otherwise remembered App session while the encrypted device token and password
+     * remain usable. Re-authenticating here avoids requiring an edit-and-save round trip.
+     */
+    override fun onStart(owner: LifecycleOwner) {
+        val now = System.currentTimeMillis()
+        if (now - lastForegroundReconnectAt < FOREGROUND_RECONNECT_COOLDOWN_MS) return
+        lastForegroundReconnectAt = now
+        val accountId = _state.value.preferences.currentAccountId
+        if (accountId.isNotBlank()) {
+            scheduleAccountReconnect(accountId, accountEpoch, reportFailure = false)
         }
     }
 
@@ -487,106 +509,117 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         scheduleChatPersist()
+        // This request is initiated while the App is visible. Promote the process
+        // before launching the stream so Android/ColorOS cannot suspend the socket
+        // merely because the user backgrounds the Activity or turns the screen off.
+        ChatKeepAliveService.start(getApplication())
         chatJob = viewModelScope.launch {
-            var streamFailed = false
-            val result = runCatching {
-                coroutineScope {
-                    val events = Channel<StreamEvent>(Channel.UNLIMITED)
-                    val renderer = launch {
-                        while (true) {
-                            val first = events.receiveCatching().getOrNull() ?: break
-                            val batch = mutableListOf(first)
-                            delay(STREAM_RENDER_INTERVAL_MS)
-                            while (true) batch += events.tryReceive().getOrNull() ?: break
-                            applyStreamEvents(assistantId, batch)
+            try {
+                var streamFailed = false
+                val result = runCatching {
+                    coroutineScope {
+                        val events = Channel<StreamEvent>(Channel.UNLIMITED)
+                        val renderer = launch {
+                            while (true) {
+                                val first = events.receiveCatching().getOrNull() ?: break
+                                val batch = mutableListOf(first)
+                                delay(STREAM_RENDER_INTERVAL_MS)
+                                while (true) batch += events.tryReceive().getOrNull() ?: break
+                                applyStreamEvents(assistantId, batch)
+                            }
                         }
-                    }
-                    try {
-                        repo.streamChat(
-                            prompt,
-                            sessionId,
-                            assistantId,
-                            "app_$deviceId".take(128),
-                            pendingAttachments.map { it.path },
-                            reasoningEffort,
-                        ) { event ->
-                            if (event is StreamEvent.Error) streamFailed = true
-                            events.trySend(event)
+                        try {
+                            repo.streamChat(
+                                prompt,
+                                sessionId,
+                                assistantId,
+                                conversationClientId(),
+                                pendingAttachments.map { it.path },
+                                reasoningEffort,
+                            ) { event ->
+                                if (event is StreamEvent.Error) streamFailed = true
+                                events.trySend(event)
+                            }
+                        } finally {
+                            events.close()
+                            renderer.join()
                         }
-                    } finally {
-                        events.close()
-                        renderer.join()
                     }
                 }
-            }
-            val wasStopping = _state.value.chatStopping && _state.value.activeRunId == assistantId
-            val failed = (result.isFailure || streamFailed) && !wasStopping
-            val failureText = getApplication<Application>().getString(R.string.chat_transport_failed)
-            val emptyText = getApplication<Application>().getString(R.string.chat_empty_response)
-            val stoppedText = getApplication<Application>().getString(R.string.chat_stopped)
-            val finishedAt = System.currentTimeMillis()
-            _state.update { current ->
-                current.copy(
-                    streaming = false,
-                    activeRunId = if (current.activeRunId == assistantId) "" else current.activeRunId,
-                    chatStopping = false,
-                    guidanceSubmitting = false,
-                    error = if (failed) failureText else current.error,
-                    chatEntries = current.chatEntries.map { entry ->
-                        if (entry.role == ChatRole.GUIDANCE && entry.guidanceStatus == GuidanceStatus.ACCEPTED) {
-                            entry.copy(guidanceStatus = GuidanceStatus.COMPLETED)
-                        } else if (entry.id != assistantId) entry
-                        else {
-                            val hasVisibleContent = entry.text.isNotBlank() || entry.reasoning.isNotBlank() || entry.tools.isNotEmpty() || entry.media.isNotEmpty()
-                            entry.copy(
-                                text = when {
-                                    failed -> failureText
-                                    wasStopping && !hasVisibleContent -> stoppedText
-                                    !hasVisibleContent -> emptyText
-                                    else -> entry.text
-                                },
-                                tools = entry.tools.map { tool ->
-                                    if (tool.status == ToolStatus.RUNNING) tool.copy(
-                                        status = ToolStatus.FAILED,
-                                        elapsedMs = (finishedAt - tool.startedAtMs).coerceAtLeast(0),
-                                    ) else tool
-                                },
-                                usage = (entry.usage ?: ChatUsageUi()).copy(
-                                    elapsedMs = entry.usage?.elapsedMs?.takeIf { it > 0 }
-                                        ?: (finishedAt - entry.startedAtMs).coerceAtLeast(0),
-                                ),
-                            )
+                val wasStopping = _state.value.chatStopping && _state.value.activeRunId == assistantId
+                val failed = (result.isFailure || streamFailed) && !wasStopping
+                val failureText = getApplication<Application>().getString(R.string.chat_transport_failed)
+                val emptyText = getApplication<Application>().getString(R.string.chat_empty_response)
+                val stoppedText = getApplication<Application>().getString(R.string.chat_stopped)
+                val finishedAt = System.currentTimeMillis()
+                _state.update { current ->
+                    current.copy(
+                        streaming = false,
+                        activeRunId = if (current.activeRunId == assistantId) "" else current.activeRunId,
+                        chatStopping = false,
+                        guidanceSubmitting = false,
+                        error = if (failed) failureText else current.error,
+                        chatEntries = current.chatEntries.map { entry ->
+                            if (entry.role == ChatRole.GUIDANCE && entry.guidanceStatus == GuidanceStatus.ACCEPTED) {
+                                entry.copy(guidanceStatus = GuidanceStatus.COMPLETED)
+                            } else if (entry.id != assistantId) entry
+                            else {
+                                val hasVisibleContent = entry.text.isNotBlank() || entry.reasoning.isNotBlank() || entry.tools.isNotEmpty() || entry.media.isNotEmpty()
+                                entry.copy(
+                                    text = when {
+                                        failed -> failureText
+                                        wasStopping && !hasVisibleContent -> stoppedText
+                                        !hasVisibleContent -> emptyText
+                                        else -> entry.text
+                                    },
+                                    tools = entry.tools.map { tool ->
+                                        if (tool.status == ToolStatus.RUNNING) tool.copy(
+                                            status = ToolStatus.FAILED,
+                                            elapsedMs = (finishedAt - tool.startedAtMs).coerceAtLeast(0),
+                                        ) else tool
+                                    },
+                                    usage = (entry.usage ?: ChatUsageUi()).copy(
+                                        elapsedMs = entry.usage?.elapsedMs?.takeIf { it > 0 }
+                                            ?: (finishedAt - entry.startedAtMs).coerceAtLeast(0),
+                                    ),
+                                )
+                            }
                         }
-                    },
-                )
-            }
-            if (failed) {
-                _messages.emit(UiMessage(failureText, UiMessageType.Error))
-            } else if (!wasStopping) {
-                val reply = _state.value.chatEntries.firstOrNull { it.id == assistantId }?.text.orEmpty()
-                postNotification(
-                    key = "conversation:$sessionId",
-                    channel = KemoApp.CHAT_CHANNEL,
-                    title = getApplication<Application>().getString(R.string.notification_chat_complete_title),
-                    text = getApplication<Application>().getString(
-                        R.string.notification_chat_complete_body,
-                        prompt.take(48).ifBlank { reply.take(48).ifBlank { getApplication<Application>().getString(R.string.app_name) } },
-                    ),
-                    openTasks = false,
-                )
-            }
-            loadStatusInternal()
-            persistChatNow()
-            val queued = pendingNextTurnGuidance?.takeIf { it.originRunId == assistantId }
-            if (queued != null) pendingNextTurnGuidance = null
-            chatJob = null
-            if (queued != null) {
-                startChat(
-                    prompt = queued.text,
-                    reasoningEffort = queued.reasoningEffort,
-                    pendingAttachments = queued.attachments,
-                    reuseUserEntryId = queued.entryId,
-                )
+                    )
+                }
+                if (failed) {
+                    _messages.emit(UiMessage(failureText, UiMessageType.Error))
+                } else if (!wasStopping) {
+                    val reply = _state.value.chatEntries.firstOrNull { it.id == assistantId }?.text.orEmpty()
+                    postNotification(
+                        key = "conversation:$sessionId",
+                        channel = KemoApp.CHAT_CHANNEL,
+                        title = getApplication<Application>().getString(R.string.notification_chat_complete_title),
+                        text = getApplication<Application>().getString(
+                            R.string.notification_chat_complete_body,
+                            prompt.take(48).ifBlank { reply.take(48).ifBlank { getApplication<Application>().getString(R.string.app_name) } },
+                        ),
+                        openTasks = false,
+                    )
+                }
+                loadStatusInternal()
+                persistChatNow()
+                val queued = pendingNextTurnGuidance?.takeIf { it.originRunId == assistantId }
+                if (queued != null) pendingNextTurnGuidance = null
+                if (queued != null) {
+                    startChat(
+                        prompt = queued.text,
+                        reasoningEffort = queued.reasoningEffort,
+                        pendingAttachments = queued.attachments,
+                        reuseUserEntryId = queued.entryId,
+                    )
+                } else {
+                    chatJob = null
+                }
+            } finally {
+                // A queued guidance turn sets streaming=true before this finally
+                // block, so it keeps the same foreground interval without a gap.
+                if (!_state.value.streaming) ChatKeepAliveService.stop(getApplication())
             }
         }
     }
@@ -798,8 +831,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return maxOf(localRounds, reportedRounds)
     }
 
+    private fun conversationClientId(): String = "app_$deviceId".take(128)
+
     fun newConversation() {
         if (_state.value.streaming) return
+        resetConversationState()
+        viewModelScope.launch { persistChatNow() }
+        // Ask the bridge for the fresh session snapshot immediately. This keeps
+        // the panel populated with zero/initial values without waiting for the
+        // next outbound chat request to trigger a status refresh.
+        viewModelScope.launch { loadStatusInternal() }
+    }
+
+    private fun resetConversationState() {
         _state.update {
             it.copy(
                 chatEntries = emptyList(),
@@ -812,24 +856,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 chatStopping = false,
                 // Runtime/context telemetry belongs to the conversation session.
                 // Clear it synchronously so the header and context sheet never
-                // display the previous session after "clear conversation".
+                // display data from the discarded session.
                 status = null,
                 error = "",
             )
         }
-        viewModelScope.launch { persistChatNow() }
-        // Ask the bridge for the fresh session snapshot immediately. This keeps
-        // the panel populated with zero/initial values without waiting for the
-        // next outbound chat request to trigger a status refresh.
-        viewModelScope.launch { loadStatusInternal() }
     }
 
-    fun clearConversation() = newConversation()
+    fun clearConversation() {
+        if (_state.value.streaming) return
+        launchBusy(
+            key = "conversation:clear",
+            successMessage = R.string.feedback_conversation_cleared,
+        ) {
+            val sessionId = _state.value.chatSessionId
+            val hasConversation = sessionId.isNotBlank() &&
+                (_state.value.chatEntries.isNotEmpty() || currentConversationRound() > 0)
+            // "Clear" discards the current server-side conversation. Previously it
+            // only replaced the local list, so the next status request resolved the
+            // still-active server session and immediately restored every message.
+            if (hasConversation) repo.deleteConversation(sessionId, conversationClientId())
+            resetConversationState()
+            persistChatNow()
+            loadStatusInternal()
+            loadConversationsInternal()
+        }
+    }
 
     fun saveConversation() = launchBusy {
         val sessionId = _state.value.chatSessionId
         require(sessionId.isNotBlank() && _state.value.chatEntries.isNotEmpty()) { "当前没有可保存的对话" }
-        repo.closeConversation(sessionId)
+        repo.closeConversation(sessionId, conversationClientId())
         _state.update { it.copy(chatClosed = true) }
         persistChatNow()
         loadConversationsInternal()
@@ -843,7 +900,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveAndNewConversation() = launchBusy {
         val sessionId = _state.value.chatSessionId
-        if (sessionId.isNotBlank() && _state.value.chatEntries.isNotEmpty()) repo.closeConversation(sessionId)
+        if (sessionId.isNotBlank() && _state.value.chatEntries.isNotEmpty()) {
+            repo.closeConversation(sessionId, conversationClientId())
+        }
         _state.update { it.copy(chatEntries = emptyList(), chatSessionId = "app-${UUID.randomUUID()}", chatClosed = false, status = null) }
         persistChatNow()
         loadStatusInternal()
@@ -860,7 +919,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteConversation(sessionId: String) = launchBusy {
-        repo.deleteConversation(sessionId)
+        repo.deleteConversation(sessionId, conversationClientId())
         if (_state.value.chatSessionId == sessionId) {
             _state.update { it.copy(chatEntries = emptyList(), chatSessionId = "app-${UUID.randomUUID()}", chatClosed = false, status = null) }
             persistChatNow()
@@ -938,9 +997,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun scheduleAccountReconnect(
+        accountId: String,
+        expectedEpoch: Long,
+        reportFailure: Boolean,
+    ) {
+        if (accountId.isBlank() || reconnectingAccountId == accountId) return
+        accountRestoreJob?.cancel()
+        reconnectingAccountId = accountId
+        accountRestoreJob = viewModelScope.launch {
+            try {
+                val credentials = runCatching { repo.ensureAccountSession(accountId) }
+                    .getOrElse {
+                        if (_state.value.preferences.currentAccountId == accountId && accountEpoch == expectedEpoch) {
+                            val usableSession = repo.credentialState(accountId).let {
+                                it.deviceToken.isNotBlank() && it.sessionToken.isNotBlank()
+                            }
+                            _state.update { current -> current.copy(configured = usableSession) }
+                            if (reportFailure) {
+                                val message = getApplication<Application>().getString(R.string.feedback_account_reconnect_required)
+                                _state.update { current -> current.copy(error = message) }
+                                _messages.emit(UiMessage(message, UiMessageType.Error))
+                            }
+                        }
+                        return@launch
+                    }
+                if (_state.value.preferences.currentAccountId != accountId || accountEpoch != expectedEpoch) return@launch
+                _state.update {
+                    it.copy(
+                        configured = credentials.deviceToken.isNotBlank() && credentials.sessionToken.isNotBlank(),
+                        error = "",
+                    )
+                }
+                restoreAccountChat(accountId, expectedEpoch)
+                if (_state.value.unlocked) startSocket()
+                loadTasksInternal()
+                loadModulesInternal()
+            } finally {
+                if (reconnectingAccountId == accountId) reconnectingAccountId = ""
+            }
+        }
+    }
+
     private suspend fun restoreAccountChat(accountId: String, expectedEpoch: Long) {
         if (accountId.isBlank()) return
-        val clientId = "app_$deviceId".take(128)
+        val clientId = conversationClientId()
         val target = runCatching {
             conversationTarget(repo.activeConversation(clientId))
         }.getOrNull() ?: runCatching {
@@ -987,7 +1088,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadStatusForAccount(accountId: String, sessionId: String, expectedEpoch: Long) {
-        runCatching { repo.status(sessionId, "app_$deviceId".take(128)) }.onSuccess { value ->
+        runCatching { repo.status(sessionId, conversationClientId()) }.onSuccess { value ->
             if (_state.value.preferences.currentAccountId == accountId && accountEpoch == expectedEpoch) {
                 applyAuthoritativeStatus(value, accountId, expectedEpoch)
             }
@@ -1431,7 +1532,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun loadStatusInternal() {
         val requestContext = accountRequestContext()
         val sessionId = _state.value.chatSessionId
-        runCatching { repo.status(sessionId, "app_$deviceId".take(128)) }
+        runCatching { repo.status(sessionId, conversationClientId()) }
             .onSuccess { value ->
                 if (isCurrentAccountRequest(requestContext)) {
                     applyAuthoritativeStatus(value, requestContext.accountId, requestContext.epoch)
@@ -1615,6 +1716,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (_state.value.preferences.currentAccountId == account.id) onEvent(event)
             },
             onOpen = { DeviceActionReporter.flush(getApplication(), account.username, deviceId) },
+            onAuthenticationFailed = {
+                if (_state.value.preferences.currentAccountId == account.id) {
+                    viewModelScope.launch {
+                        repo.clearSession(account.id)
+                        _state.update { it.copy(configured = false) }
+                        scheduleAccountReconnect(account.id, accountEpoch, reportFailure = true)
+                    }
+                }
+            },
         )
         eventSocket = socket
         DeviceActionReporter.attach(account.username, deviceId) { commandId, status, detail ->
@@ -1727,7 +1837,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         NotificationManagerCompat.from(context).notify(requestCode, notification)
     }
 
-    override fun onCleared() { DeviceActionReporter.detach(); eventSocket?.stop(); super.onCleared() }
+    override fun onCleared() {
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
+        DeviceActionReporter.detach()
+        eventSocket?.stop()
+        super.onCleared()
+    }
 
     private fun parseHistoryMessages(payload: JsonElement, sessionId: String): List<ChatEntry> {
         val root = payload as? JsonObject
@@ -1894,6 +2009,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         const val ACCOUNT_TRANSFER_IMPORT_KEY = "account-transfer:import"
         const val ACCOUNT_TRANSFER_EXPORT_KEY = "account-transfer:export"
+        private const val FOREGROUND_RECONNECT_COOLDOWN_MS = 5_000L
         private const val STREAM_RENDER_INTERVAL_MS = 64L
         private val TEXT_PREVIEW_EXTENSIONS = setOf(
             "txt", "md", "markdown", "json", "xml", "csv", "tsv", "log", "ini", "conf", "yaml", "yml",
