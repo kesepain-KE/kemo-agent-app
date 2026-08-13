@@ -34,6 +34,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -101,11 +104,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -195,6 +201,7 @@ fun ChatScreen(
     val isDragged by listState.interactionSource.collectIsDraggedAsState()
     val density = LocalDensity.current
     val view = LocalView.current
+    val focusManager = LocalFocusManager.current
     val bottomThresholdPx = with(density) { 48.dp.roundToPx() }
     val imeBottom = WindowInsets.ime.getBottom(density)
     var chatBottomInWindow by remember { mutableIntStateOf(0) }
@@ -349,7 +356,17 @@ fun ChatScreen(
                 )
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).pointerInput(focusManager) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            // Do not consume the gesture: LazyColumn must keep its
+                            // normal scroll/fling behavior while a tap still hides
+                            // the keyboard.
+                            if (waitForUpOrCancellation() != null) {
+                                focusManager.clearFocus(force = true)
+                            }
+                        }
+                    },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 92.dp),
                     verticalArrangement = Arrangement.Top,
                 ) {
@@ -1383,6 +1400,8 @@ private fun ChatComposer(
     var attachmentMenuExpanded by remember { mutableStateOf(false) }
     var pendingCameraUri by rememberSaveable { mutableStateOf("") }
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val inputScrollState = rememberScrollState()
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -1402,15 +1421,14 @@ private fun ChatComposer(
     LaunchedEffect(text) {
         inputScrollState.scrollTo(inputScrollState.maxValue)
     }
-    Column(modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (streaming) {
-            Text(
-                stringResource(R.string.guidance_running_hint),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
+    fun submit() {
+        if (hasInput && !attachmentUploading && !guidanceSubmitting && !chatStopping && !chatClosed) {
+            onSend()
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
         }
+    }
+    Column(modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (attachments.isNotEmpty()) {
             Column(
                 Modifier.fillMaxWidth().heightIn(max = 164.dp).verticalScroll(rememberScrollState()),
@@ -1511,7 +1529,13 @@ private fun ChatComposer(
                 )
                 if (streaming) {
                     IconButton(
-                        onClick = onSend,
+                        onClick = {
+                            if (hasInput && !attachmentUploading && !guidanceSubmitting && !chatStopping) {
+                                onSend()
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
+                            }
+                        },
                         enabled = hasInput && !attachmentUploading && !guidanceSubmitting && !chatStopping,
                     ) {
                         if (guidanceSubmitting) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -1534,7 +1558,7 @@ private fun ChatComposer(
                 }
             }
             IconButton(
-                onClick = if (streaming) onStop else onSend,
+                onClick = if (streaming) onStop else ::submit,
                 enabled = if (streaming) !chatStopping else !chatClosed && !attachmentUploading && hasInput,
                 modifier = Modifier.padding(start = 8.dp).background(
                     if (streaming) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
