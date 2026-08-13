@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.4-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.5-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -71,10 +71,11 @@ kemo-agent-app connects to your deployed kemo-agent through the bridge service. 
 The chat screen is organized around real conversations rather than a single input box:
 
 - Streaming output that reveals the agent's reply word by word;
+- An active reply is protected by a visible background-running notification, allowing its network stream to continue after switching apps or turning off the screen;
 - Markdown rendering with clear code blocks, lists, and quotes;
 - Reasoning and tool calls (arguments, results, success or failure) are shown so the agent's actions stay understandable;
 - Token usage, cache hits, and response time are displayed;
-- Conversation history can be saved, switched, and deleted; clear the current conversation or manually compress context in one step;
+- Conversation history can be saved, switched, and deleted; clearing also discards the active server-side session and resets its context, while manual context compression remains available;
 - Attachments can be added and handed to the agent;
 - Frequent actions (clear conversation, save history, compress context, save and start a new one) are grouped into quick actions.
 
@@ -187,7 +188,9 @@ No matter which entry point you use, it connects to the same agent, the same his
 
 ## Current status
 
-Current version: `1.1.4` (versionCode 6)
+Current version: `1.1.5` (versionCode 7)
+
+`1.1.5` strengthens account recovery and chat input behavior after long idle periods. When the App starts or returns to the foreground, it validates the selected account; if the session was invalidated, encrypted saved credentials are used to reconnect automatically and resynchronize that account's chat history, context window, and runtime status. WebSocket authentication failures use the same recovery path. Sending a message now dismisses the IME, tapping empty chat space hides it, and the running-task hint above the composer has been removed.
 
 `1.1.4` strengthens multi-account and device collaboration. Switching accounts now restores the target account's own App conversation and chat progress, while WebSockets, background notifications, and pending result reports remain account-scoped. The global `kemo_app` extension gains a single targetable device-action protocol, and the App initially supports system alarms, timers, calendar events, and to-dos through a strict action allowlist, TTLs, an idempotent state machine, and explicit user confirmation instead of arbitrary Intents or silent system writes. This release also adds OnePlus/ColorOS calendar compatibility, offline result recovery, and per-device capability reporting.
 

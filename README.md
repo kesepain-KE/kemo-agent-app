@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.4-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.5-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -71,10 +71,11 @@ kemo-agent-app 通过桥接服务连接部署好的 kemo-agent，连接页完成
 聊天页围绕真实对话组织，而不是只提供一个输入框：
 
 - 流式输出，逐字呈现智能体的回复；
+- 对话运行期间使用可见的后台运行通知托管网络流，切换应用或熄屏后仍可继续接收回复；
 - Markdown 渲染，代码块、列表与引用清晰可读；
 - 展示思考过程与工具调用（参数、结果、成功或失败），让智能体的一举一动可以被理解；
 - 显示 Token 消耗、缓存命中与响应耗时；
-- 历史会话可以保存、切换、删除，也可以一键清除当前对话或手动压缩上下文；
+- 历史会话可以保存、切换、删除；“清除对话”会同步丢弃当前服务端会话并重置上下文，也可以手动压缩上下文；
 - 支持添加附件，把文件交给智能体处理；
 - 常用操作（清除对话、保存历史、压缩上下文、保存并新对话）聚合为快捷入口。
 
@@ -186,7 +187,9 @@ kemo-agent-app 并不试图替代网页端或命令行。
 
 ## 当前状态
 
-当前版本：`1.1.4`（versionCode 6）
+当前版本：`1.1.5`（versionCode 7）
+
+`1.1.5` 增强长时间闲置后的账号恢复与聊天输入体验：App 启动或从后台回到前台时会主动验证当前账号，会话失效时使用已保存的加密凭据自动重新连接并同步目标账号的聊天历史、上下文窗口和运行状态；WebSocket 鉴权失效也会触发同一恢复流程。聊天发送后自动收起输入法，点击聊天空白区域可以隐藏输入法，执行任务时不再显示输入框上方的运行提示文字。
 
 `1.1.4` 完善多账号与设备协作链路：账号切换会恢复目标账号自己的 App 会话与聊天进度，WebSocket、后台通知和待上报结果均按账号隔离；全局 `kemo_app` 拓展新增统一、可定向的设备操作协议，App 首批安全接入系统闹钟、倒计时、日历日程和待办，并通过动作白名单、有效期、幂等状态机与用户确认界面阻止任意 Intent 或静默系统写入。该版本同时补充 OnePlus/ColorOS 日历兼容、离线结果恢复和多设备能力上报。
 
