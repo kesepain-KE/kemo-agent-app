@@ -65,6 +65,7 @@
     <string name="usage_elapsed">Time %1$s</string>
     <string name="copy_reply">Copy reply</string>
     <string name="feedback_copied">Copied to clipboard</string>
+    <string name="feedback_conversation_cleared">Current conversation cleared</string>
     <string name="feedback_regenerate_unavailable">No response is available to regenerate</string>
     <string name="jump_to_latest">Jump to latest message</string>
     <string name="add_attachment">Add file</string>
@@ -103,7 +104,7 @@
     <string name="security">Security</string>
     <string name="auto_lock">Lock after 5 minutes in background</string>
     <string name="about">About</string>
-    <string name="version">Version 1.1.4</string>
+    <string name="version">Version 1.1.5</string>
     <string name="version_details">Version details</string>
     <string name="main_version">Main version</string>
     <string name="core_version">Core version</string>
@@ -309,6 +310,10 @@
     <string name="language_current">Current language</string>
     <string name="app_about_version">App information and versions</string>
     <string name="notification_chat">Chat notifications</string>
+    <string name="notification_chat_runtime">Background conversations</string>
+    <string name="notification_chat_runtime_description">Keeps an active agent response running while Kemo is in the background</string>
+    <string name="notification_chat_running_title">Kemo is replying</string>
+    <string name="notification_chat_running_body">The conversation will continue when you switch to another app</string>
     <string name="notification_chat_complete_title">Kemo finished replying</string>
     <string name="notification_chat_complete_body">Conversation “%1$s” completed a reply</string>
     <string name="notification_cron_complete_title">Scheduled task completed</string>

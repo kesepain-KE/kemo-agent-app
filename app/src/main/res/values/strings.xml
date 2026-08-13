@@ -65,6 +65,7 @@
     <string name="usage_elapsed">耗时 %1$s</string>
     <string name="copy_reply">复制回复</string>
     <string name="feedback_copied">已复制到剪贴板</string>
+    <string name="feedback_conversation_cleared">当前对话已清除</string>
     <string name="feedback_regenerate_unavailable">暂无可重新生成的回复</string>
     <string name="jump_to_latest">回到最新消息</string>
     <string name="add_attachment">添加文件</string>
@@ -103,7 +104,7 @@
     <string name="security">安全</string>
     <string name="auto_lock">后台 5 分钟自动锁定</string>
     <string name="about">关于</string>
-    <string name="version">版本 1.1.4</string>
+    <string name="version">版本 1.1.5</string>
     <string name="version_details">版本详情</string>
     <string name="main_version">主版本</string>
     <string name="core_version">核心版本</string>
@@ -309,6 +310,10 @@
     <string name="language_current">当前语言</string>
     <string name="app_about_version">App 关于与版本</string>
     <string name="notification_chat">对话通知</string>
+    <string name="notification_chat_runtime">后台对话</string>
+    <string name="notification_chat_runtime_description">保持正在进行的智能体回复在后台继续运行</string>
+    <string name="notification_chat_running_title">Kemo 正在回复</string>
+    <string name="notification_chat_running_body">切换到其他应用后，对话仍会继续运行</string>
     <string name="notification_chat_complete_title">Kemo 已完成回复</string>
     <string name="notification_chat_complete_body">对话“%1$s”已完成一轮回复</string>
     <string name="notification_cron_complete_title">定时任务已完成</string>

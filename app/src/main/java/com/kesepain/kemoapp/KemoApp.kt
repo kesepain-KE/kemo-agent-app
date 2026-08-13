@@ -19,6 +19,11 @@ class KemoApp : Application(), DefaultLifecycleObserver {
             manager.createNotificationChannels(
                 listOf(
                     NotificationChannel(CHAT_CHANNEL, getString(R.string.notification_chat), NotificationManager.IMPORTANCE_DEFAULT),
+                    NotificationChannel(CHAT_RUNTIME_CHANNEL, getString(R.string.notification_chat_runtime), NotificationManager.IMPORTANCE_LOW).apply {
+                        description = getString(R.string.notification_chat_runtime_description)
+                        setSound(null, null)
+                        enableVibration(false)
+                    },
                     NotificationChannel(TASK_CHANNEL, getString(R.string.notification_tasks), NotificationManager.IMPORTANCE_DEFAULT),
                     NotificationChannel(SYSTEM_CHANNEL, getString(R.string.notification_system), NotificationManager.IMPORTANCE_DEFAULT),
                     NotificationChannel(DEVICE_ACTION_CHANNEL, getString(R.string.device_action_channel), NotificationManager.IMPORTANCE_HIGH),
@@ -35,6 +40,7 @@ class KemoApp : Application(), DefaultLifecycleObserver {
 
     companion object {
         const val CHAT_CHANNEL = "kemo_chat"
+        const val CHAT_RUNTIME_CHANNEL = "kemo_chat_runtime"
         const val TASK_CHANNEL = "kemo_tasks"
         const val SYSTEM_CHANNEL = "kemo_system"
         const val DEVICE_ACTION_CHANNEL = "kemo_device_actions"
