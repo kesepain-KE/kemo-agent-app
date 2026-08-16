@@ -22,9 +22,14 @@ import com.kesepain.kemoapp.data.remote.ChatRequestDto
 import com.kesepain.kemoapp.data.stream.ChatStreamParser
 import com.kesepain.kemoapp.data.stream.StreamEvent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -36,12 +41,58 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okio.BufferedSink
 import okio.source
 import java.io.File
 import java.util.UUID
 
 data class FilePreviewPayload(val name: String, val mimeType: String, val bytes: ByteArray)
+
+data class ManagedRunReplayEvent(val eventId: Long, val event: StreamEvent)
+
+data class ManagedRunSnapshot(
+    val runId: String,
+    val sessionId: String,
+    val status: String,
+    val terminal: Boolean,
+    val recoverable: Boolean,
+    val lastEventId: Long,
+    val createdAt: Long,
+    val prompt: String,
+    val uploadedFiles: List<String>,
+    val events: List<ManagedRunReplayEvent>,
+    val error: String = "",
+)
+
+internal fun parseManagedRunSnapshot(value: JsonElement): ManagedRunSnapshot {
+    val root = value as? JsonObject ?: error("invalid run snapshot")
+    fun text(name: String): String = (root[name] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    fun long(name: String): Long = (root[name] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L
+    fun bool(name: String): Boolean = (root[name] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() == true
+    val parser = ChatStreamParser()
+    val events = (root["events"] as? JsonArray).orEmpty().mapNotNull { raw ->
+        val item = raw as? JsonObject ?: return@mapNotNull null
+        val eventId = (item["event_id"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
+        val data = (item["data"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+        parser.parsePayload(data)?.let { ManagedRunReplayEvent(eventId, it) }
+    }
+    return ManagedRunSnapshot(
+        runId = text("run_id"),
+        sessionId = text("session_id"),
+        status = text("status"),
+        terminal = bool("terminal"),
+        recoverable = bool("recoverable"),
+        lastEventId = long("last_event_id"),
+        createdAt = long("created_at"),
+        prompt = text("prompt"),
+        uploadedFiles = (root["uploaded_files"] as? JsonArray).orEmpty().mapNotNull {
+            (it as? JsonPrimitive)?.contentOrNull
+        },
+        events = events,
+        error = text("error"),
+    )
+}
 
 data class StoredCredentialState(
     val deviceToken: String = "",
@@ -375,6 +426,12 @@ class KemoRepository(private val context: Context) {
         return call { it.submitGuidance(body) }
     }
     suspend fun cancelRun(runId: String): JsonElement = call { it.cancelRun(runId) }
+
+    suspend fun activeRuns(clientId: String, sessionId: String = ""): JsonElement =
+        call { it.activeRuns(clientId, sessionId) }
+
+    suspend fun runSnapshot(runId: String, after: Long = 0): ManagedRunSnapshot =
+        parseManagedRunSnapshot(call { it.runSnapshot(runId, after) })
     suspend fun taskPlans(): JsonElement = call { it.taskPlans() }
     suspend fun cron(): JsonElement = call { it.cron() }
     suspend fun status(sessionId: String = "", clientId: String = ""): JsonElement = call { it.status(sessionId, clientId) }
@@ -583,27 +640,122 @@ class KemoRepository(private val context: Context) {
         val streamClient = bundle.client.newBuilder()
             .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
             .build()
-        streamClient.newCall(ApiClient.chatRequest(bundle, body)).execute().use { response ->
+        var cursor = 0L
+        var terminal = false
+        var initialFailure: Throwable? = null
+        try {
+            streamClient.newCall(ApiClient.chatRequest(bundle, body)).execute().use { response ->
+                if (!response.isSuccessful) {
+                    if (response.code == 401 || response.code == 403) onSessionExpired?.invoke(account.id)
+                    error("chat failed (${response.code})")
+                }
+                val consumed = consumeSse(response, parser) { _, event -> onEvent(event) }
+                cursor = maxOf(cursor, consumed.lastEventId)
+                terminal = consumed.terminal
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            initialFailure = failure
+        }
+
+        // The bridge owns the upstream run independently. A mobile socket loss
+        // therefore means "reattach", never "mark the assistant response as
+        // failed". Snapshot replay closes any event gap before the new stream.
+        while (!terminal) {
+            currentCoroutineContext().ensureActive()
+            val snapshot = try {
+                runSnapshot(runId, cursor)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                if (initialFailure != null && failure.message.orEmpty().contains("(404)")) throw initialFailure
+                delay(MANAGED_RUN_RECONNECT_DELAY_MS)
+                continue
+            }
+            initialFailure = null
+            snapshot.events.forEach { replay ->
+                cursor = maxOf(cursor, replay.eventId)
+                onEvent(replay.event)
+                if (replay.event is StreamEvent.Done || replay.event is StreamEvent.Error) terminal = true
+            }
+            cursor = maxOf(cursor, snapshot.lastEventId)
+            if (snapshot.terminal) break
+            try {
+                var resumeTerminal = false
+                resumeRun(runId, cursor) { eventId, event ->
+                    cursor = maxOf(cursor, eventId)
+                    onEvent(event)
+                    if (event is StreamEvent.Done || event is StreamEvent.Error) resumeTerminal = true
+                }
+                terminal = resumeTerminal
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                delay(MANAGED_RUN_RECONNECT_DELAY_MS)
+            }
+        }
+    }
+
+    suspend fun resumeRun(
+        runId: String,
+        after: Long,
+        onEvent: (eventId: Long, event: StreamEvent) -> Unit,
+    ): Unit = withContext(Dispatchers.IO) {
+        val (account, bundle) = bundle()
+        val parser = ChatStreamParser()
+        val url = bundle.baseUrl.toHttpUrl().newBuilder()
+            .addPathSegments("v1/runs")
+            .addPathSegment(runId)
+            .addPathSegment("stream")
+            .addQueryParameter("after", after.coerceAtLeast(0).toString())
+            .build()
+        val request = Request.Builder().url(url).get().header("Accept", "text/event-stream").build()
+        val streamClient = bundle.client.newBuilder()
+            .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build()
+        streamClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 if (response.code == 401 || response.code == 403) onSessionExpired?.invoke(account.id)
-                error("chat failed (${response.code})")
+                error("run resume failed (${response.code})")
             }
-            val source = response.body?.source() ?: error("empty chat stream")
-            val dataLines = mutableListOf<String>()
-            fun dispatchFrame() {
-                if (dataLines.isEmpty()) return
-                parser.parsePayload(dataLines.joinToString("\n"))?.let(onEvent)
-                dataLines.clear()
-            }
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-                when {
-                    line.isBlank() -> dispatchFrame()
-                    line.startsWith("data:") -> dataLines += line.removePrefix("data:").trimStart()
-                }
-            }
-            dispatchFrame()
+            consumeSse(response, parser, onEvent)
+            Unit
         }
+    }
+
+    private data class SseConsumeResult(val lastEventId: Long, val terminal: Boolean)
+
+    private fun consumeSse(
+        response: okhttp3.Response,
+        parser: ChatStreamParser,
+        onEvent: (eventId: Long, event: StreamEvent) -> Unit,
+    ): SseConsumeResult {
+        val source = response.body?.source() ?: error("empty chat stream")
+        val dataLines = mutableListOf<String>()
+        var eventId = 0L
+        var lastEventId = 0L
+        var terminal = false
+        fun dispatchFrame() {
+            if (dataLines.isEmpty()) return
+            parser.parsePayload(dataLines.joinToString("\n"))?.let { event ->
+                onEvent(eventId, event)
+                lastEventId = maxOf(lastEventId, eventId)
+                if (event is StreamEvent.Done || event is StreamEvent.Error) terminal = true
+            }
+            dataLines.clear()
+            eventId = 0L
+        }
+        while (!source.exhausted()) {
+            val line = source.readUtf8Line() ?: break
+            when {
+                line.isBlank() -> dispatchFrame()
+                line.startsWith("id:") -> eventId = line.removePrefix("id:").trim().toLongOrNull() ?: 0L
+                line.startsWith("data:") -> dataLines += line.removePrefix("data:").trimStart()
+            }
+        }
+        dispatchFrame()
+        return SseConsumeResult(lastEventId, terminal)
     }
 
     suspend fun changeAppPassword(accountId: String, oldPassword: String, newPassword: String): Boolean {
@@ -638,6 +790,7 @@ class KemoRepository(private val context: Context) {
         private const val DEFAULT_SESSION_AGE_SECONDS = 2L * 60L * 60L
         private const val MAX_UPLOAD_BYTES = 80L * 1024L * 1024L
         private const val MAX_CHAT_MEDIA_CACHE_BYTES = 200L * 1024L * 1024L
+        private const val MANAGED_RUN_RECONNECT_DELAY_MS = 1_500L
         private const val MAX_FILE_PREVIEW_BYTES = 24L * 1024L * 1024L
         fun accountId(baseUrl: String, username: String) = sha256("${baseUrl.trimEnd('/')}|$username").take(20)
         fun flattenObjects(value: JsonElement): List<JsonObject> {

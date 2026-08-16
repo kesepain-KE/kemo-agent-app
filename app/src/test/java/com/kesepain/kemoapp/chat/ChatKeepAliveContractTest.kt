@@ -31,5 +31,7 @@ class ChatKeepAliveContractTest {
         ).readText()
         assertTrue(viewModel.contains("ChatKeepAliveService.start(getApplication())"))
         assertTrue(viewModel.contains("ChatKeepAliveService.stop(getApplication())"))
+        assertTrue(viewModel.contains("resumePersistedRun"))
+        assertTrue(viewModel.contains("repo.runSnapshot(runId, cursor)"))
     }
 }

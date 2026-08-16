@@ -59,6 +59,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -257,8 +259,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), D
                             chatEntries = restored,
                             chatSessionId = values.chatSessionId.ifBlank { "app-${UUID.randomUUID()}" },
                             chatClosed = false,
-                            streaming = false,
-                            activeRunId = "",
+                            streaming = values.chatActiveRunId.isNotBlank(),
+                            activeRunId = values.chatActiveRunId,
                             guidanceSubmitting = false,
                             chatStopping = false,
                             pendingChatAttachments = emptyList(),
@@ -509,6 +511,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), D
             )
         }
         scheduleChatPersist()
+        // Persist the detached run identity before opening the network stream.
+        // If Android kills the process immediately afterwards, the next launch
+        // can still retrieve the bridge snapshot instead of losing the run.
+        viewModelScope.launch { persistChatNow() }
         // This request is initiated while the App is visible. Promote the process
         // before launching the stream so Android/ColorOS cannot suspend the socket
         // merely because the user backgrounds the Activity or turns the screen off.
@@ -1042,6 +1048,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application), D
     private suspend fun restoreAccountChat(accountId: String, expectedEpoch: Long) {
         if (accountId.isBlank()) return
         val clientId = conversationClientId()
+        val existingRunId = _state.value.activeRunId
+        if (chatJob?.isActive == true && existingRunId.isNotBlank()) {
+            loadAgentConfigForAccount(accountId, expectedEpoch)
+            loadStatusForAccount(accountId, _state.value.chatSessionId, expectedEpoch)
+            loadConversationsForAccount(accountId, expectedEpoch)
+            return
+        }
+        val storedRunId = _state.value.preferences.chatActiveRunId
+        val storedSessionId = _state.value.preferences.chatSessionId
+        val discoveredRun = if (storedRunId.isBlank()) {
+            runCatching { activeManagedRun(repo.activeRuns(clientId)) }.getOrNull()
+        } else {
+            null
+        }
+        val savedRunId = storedRunId.ifBlank { discoveredRun?.first.orEmpty() }
+        val savedSessionId = discoveredRun?.second ?: storedSessionId
+        if (savedRunId.isNotBlank() && savedSessionId.isNotBlank()) {
+            val savedEntries = runCatching {
+                ApiClient.json.decodeFromString<List<ChatEntry>>(_state.value.preferences.chatHistoryJson)
+            }.getOrDefault(emptyList()).takeLast(100)
+            if (_state.value.preferences.currentAccountId != accountId || accountEpoch != expectedEpoch) return
+            _state.update { current ->
+                current.copy(
+                    chatEntries = savedEntries,
+                    chatSessionId = savedSessionId,
+                    chatClosed = false,
+                    streaming = true,
+                    activeRunId = savedRunId,
+                    guidanceSubmitting = false,
+                    chatStopping = false,
+                    status = null,
+                    error = "",
+                )
+            }
+            persistChatNow(accountId)
+            resumePersistedRun(accountId, expectedEpoch, savedRunId)
+            loadAgentConfigForAccount(accountId, expectedEpoch)
+            loadStatusForAccount(accountId, savedSessionId, expectedEpoch)
+            loadConversationsForAccount(accountId, expectedEpoch)
+            return
+        }
         val target = runCatching {
             conversationTarget(repo.activeConversation(clientId))
         }.getOrNull() ?: runCatching {
@@ -1084,6 +1131,158 @@ class MainViewModel(application: Application) : AndroidViewModel(application), D
         persistChatNow(accountId)
         loadAgentConfigForAccount(accountId, expectedEpoch)
         loadStatusForAccount(accountId, target.sessionId, expectedEpoch)
+        loadConversationsForAccount(accountId, expectedEpoch)
+    }
+
+    private fun activeManagedRun(value: JsonElement): Pair<String, String>? {
+        val root = value as? JsonObject ?: return null
+        val runs = root["runs"] as? JsonArray ?: return null
+        val item = runs.firstOrNull() as? JsonObject ?: return null
+        val runId = (item["run_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val sessionId = (item["session_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        return if (runId.isNotBlank() && sessionId.isNotBlank()) runId to sessionId else null
+    }
+
+    private fun resumePersistedRun(accountId: String, expectedEpoch: Long, runId: String) {
+        if (runId.isBlank() || chatJob?.isActive == true) return
+        ChatKeepAliveService.start(getApplication())
+        chatJob = viewModelScope.launch {
+            var cursor = 0L
+            var prepared = false
+            var terminalStatus = ""
+            try {
+                while (
+                    currentCoroutineContext().isActive &&
+                    _state.value.preferences.currentAccountId == accountId &&
+                    accountEpoch == expectedEpoch &&
+                    _state.value.activeRunId == runId
+                ) {
+                    val snapshotResult = runCatching { repo.runSnapshot(runId, cursor) }
+                    val snapshotFailure = snapshotResult.exceptionOrNull()
+                    if (snapshotFailure != null) {
+                        if (snapshotFailure.message.orEmpty().contains("(404)")) {
+                            restoreCompletedRunFromHistory(accountId, expectedEpoch, runId)
+                            terminalStatus = "history"
+                            break
+                        }
+                        delay(MANAGED_RUN_RECONNECT_DELAY_MS)
+                        continue
+                    }
+                    val snapshot = snapshotResult.getOrThrow()
+                    if (!prepared) {
+                        prepared = true
+                        _state.update { current ->
+                            val existing = current.chatEntries.firstOrNull { it.id == runId }
+                            val blank = (existing ?: ChatEntry(
+                                id = runId,
+                                role = ChatRole.ASSISTANT,
+                                startedAtMs = snapshot.createdAt.takeIf { it > 0 }?.times(1_000)
+                                    ?: System.currentTimeMillis(),
+                            )).copy(
+                                text = "",
+                                reasoning = "",
+                                tools = emptyList(),
+                                usage = null,
+                                media = emptyList(),
+                            )
+                            val withUser = if (
+                                current.chatEntries.none { it.role == ChatRole.USER } && snapshot.prompt.isNotBlank()
+                            ) {
+                                current.chatEntries + ChatEntry(
+                                    id = "recovered-user-${snapshot.createdAt}",
+                                    role = ChatRole.USER,
+                                    text = snapshot.prompt,
+                                    attachments = snapshot.uploadedFiles.map { path ->
+                                        ChatAttachmentUi(
+                                            name = path.substringAfterLast('/').substringAfterLast('\\').ifBlank { "file" },
+                                            path = path,
+                                        )
+                                    },
+                                )
+                            } else {
+                                current.chatEntries
+                            }
+                            val entries = if (existing == null) withUser + blank else withUser.map {
+                                if (it.id == runId) blank else it
+                            }
+                            current.copy(chatEntries = entries.takeLast(100))
+                        }
+                    }
+                    if (snapshot.events.isNotEmpty()) {
+                        cursor = maxOf(cursor, snapshot.events.maxOf { it.eventId })
+                        applyStreamEvents(runId, snapshot.events.map { it.event })
+                    }
+                    cursor = maxOf(cursor, snapshot.lastEventId)
+                    if (snapshot.terminal) {
+                        terminalStatus = snapshot.status
+                        break
+                    }
+                    runCatching {
+                        repo.resumeRun(runId, cursor) { eventId, event ->
+                            cursor = maxOf(cursor, eventId)
+                            applyStreamEvents(runId, listOf(event))
+                        }
+                    }.onFailure {
+                        delay(MANAGED_RUN_RECONNECT_DELAY_MS)
+                    }
+                }
+                if (terminalStatus.isNotBlank() && terminalStatus != "history") {
+                    finishRecoveredRun(accountId, expectedEpoch, runId, terminalStatus)
+                }
+            } finally {
+                if (_state.value.activeRunId != runId || !_state.value.streaming) {
+                    ChatKeepAliveService.stop(getApplication())
+                }
+                if (chatJob === currentCoroutineContext()[Job]) chatJob = null
+            }
+        }
+    }
+
+    private suspend fun restoreCompletedRunFromHistory(accountId: String, expectedEpoch: Long, runId: String) {
+        val sessionId = _state.value.chatSessionId
+        val history = runCatching { parseHistoryMessages(repo.conversationMessages(sessionId), sessionId) }.getOrNull()
+        if (_state.value.preferences.currentAccountId != accountId || accountEpoch != expectedEpoch) return
+        _state.update { current ->
+            current.copy(
+                chatEntries = history?.takeLast(100) ?: current.chatEntries,
+                streaming = false,
+                activeRunId = if (current.activeRunId == runId) "" else current.activeRunId,
+                chatStopping = false,
+                guidanceSubmitting = false,
+            )
+        }
+        persistChatNow(accountId)
+    }
+
+    private suspend fun finishRecoveredRun(accountId: String, expectedEpoch: Long, runId: String, status: String) {
+        if (_state.value.preferences.currentAccountId != accountId || accountEpoch != expectedEpoch) return
+        val failed = status in setOf("failed", "interrupted")
+        val finishedAt = System.currentTimeMillis()
+        _state.update { current ->
+            current.copy(
+                streaming = false,
+                activeRunId = if (current.activeRunId == runId) "" else current.activeRunId,
+                chatStopping = false,
+                guidanceSubmitting = false,
+                error = if (failed) getApplication<Application>().getString(R.string.chat_transport_failed) else current.error,
+                chatEntries = current.chatEntries.map { entry ->
+                    if (entry.id != runId) entry else entry.copy(
+                        tools = entry.tools.map { tool ->
+                            if (tool.status == ToolStatus.RUNNING) tool.copy(
+                                status = ToolStatus.FAILED,
+                                elapsedMs = (finishedAt - tool.startedAtMs).coerceAtLeast(0),
+                            ) else tool
+                        },
+                        usage = (entry.usage ?: ChatUsageUi()).copy(
+                            elapsedMs = entry.usage?.elapsedMs?.takeIf { it > 0 }
+                                ?: (finishedAt - entry.startedAtMs).coerceAtLeast(0),
+                        ),
+                    )
+                },
+            )
+        }
+        persistChatNow(accountId)
+        loadStatusForAccount(accountId, _state.value.chatSessionId, expectedEpoch)
         loadConversationsForAccount(accountId, expectedEpoch)
     }
 
@@ -1598,6 +1797,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), D
             accountId,
             ApiClient.json.encodeToString(snapshot.chatEntries.takeLast(100)),
             snapshot.chatSessionId,
+            snapshot.activeRunId,
         )
     }
 
@@ -1841,6 +2041,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), D
         ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
         DeviceActionReporter.detach()
         eventSocket?.stop()
+        // The bridge now owns the server run. Once the UI process is removed,
+        // this local foreground service no longer needs to pin Android in
+        // memory; reopening the App will attach to the durable run snapshot.
+        ChatKeepAliveService.stop(getApplication())
         super.onCleared()
     }
 
@@ -2010,6 +2214,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), D
         const val ACCOUNT_TRANSFER_IMPORT_KEY = "account-transfer:import"
         const val ACCOUNT_TRANSFER_EXPORT_KEY = "account-transfer:export"
         private const val FOREGROUND_RECONNECT_COOLDOWN_MS = 5_000L
+        private const val MANAGED_RUN_RECONNECT_DELAY_MS = 1_500L
         private const val STREAM_RENDER_INTERVAL_MS = 64L
         private val TEXT_PREVIEW_EXTENSIONS = setOf(
             "txt", "md", "markdown", "json", "xml", "csv", "tsv", "log", "ini", "conf", "yaml", "yml",

@@ -7,12 +7,14 @@ class AccountChatStateTest {
     @Test
     fun accountStatesRemainIsolated() {
         val states = mapOf(
-            "account-a" to AccountChatState("[\"a\"]", "app-a"),
-            "account-b" to AccountChatState("[\"b\"]", "app-b"),
+            "account-a" to AccountChatState("[\"a\"]", "app-a", "run-a"),
+            "account-b" to AccountChatState("[\"b\"]", "app-b", "run-b"),
         )
 
         assertEquals("app-a", resolveAccountChatState("account-a", states, "", "[]", "").sessionId)
         assertEquals("app-b", resolveAccountChatState("account-b", states, "", "[]", "").sessionId)
+        assertEquals("run-a", resolveAccountChatState("account-a", states, "", "[]", "").activeRunId)
+        assertEquals("run-b", resolveAccountChatState("account-b", states, "", "[]", "").activeRunId)
     }
 
     @Test

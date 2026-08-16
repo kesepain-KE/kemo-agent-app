@@ -15,10 +15,10 @@ import com.kesepain.kemoapp.MainActivity
 import com.kesepain.kemoapp.R
 
 /**
- * Keeps a user-started streaming reply eligible to continue after the UI is
- * backgrounded. The actual OkHttp stream remains owned by MainViewModel; this
- * service only raises the process to foreground importance for the duration of
- * that request and is stopped as soon as the request reaches a terminal state.
+ * Keeps the live App subscription eligible to continue while the UI is
+ * backgrounded. The bridge owns the framework run independently, so Android
+ * process removal only ends this local subscription; the next App process can
+ * replay and resume the persisted bridge snapshot.
  */
 class ChatKeepAliveService : Service() {
     override fun onCreate() {

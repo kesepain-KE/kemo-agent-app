@@ -28,6 +28,7 @@ data class AccountConfig(
 data class AccountChatState(
     val historyJson: String = "[]",
     val sessionId: String = "",
+    val activeRunId: String = "",
 )
 
 internal fun resolveAccountChatState(
@@ -55,6 +56,7 @@ data class AppPreferences(
     val biometricEnabled: Boolean = false,
     val chatHistoryJson: String = "[]",
     val chatSessionId: String = "",
+    val chatActiveRunId: String = "",
     val autoLockMinutes: Int = 5,
     val widgetPending: Int = 0,
     val widgetLatest: String = "",
@@ -89,6 +91,7 @@ class Prefs(private val context: Context) {
             biometricEnabled = values[BIOMETRIC_ENABLED] ?: false,
             chatHistoryJson = currentChat.historyJson,
             chatSessionId = currentChat.sessionId,
+            chatActiveRunId = currentChat.activeRunId,
             autoLockMinutes = values[AUTO_LOCK] ?: 5,
             widgetPending = values[WIDGET_PENDING] ?: 0,
             widgetLatest = values[WIDGET_LATEST].orEmpty(),
@@ -202,13 +205,13 @@ class Prefs(private val context: Context) {
         }
     }
 
-    suspend fun saveChatState(accountId: String, historyJson: String, sessionId: String) {
+    suspend fun saveChatState(accountId: String, historyJson: String, sessionId: String, activeRunId: String = "") {
         if (accountId.isBlank()) return
         context.kemoDataStore.edit { values ->
             val states = runCatching {
                 json.decodeFromString<Map<String, AccountChatState>>(values[ACCOUNT_CHAT_STATES] ?: "{}")
             }.getOrDefault(emptyMap()).toMutableMap()
-            states[accountId] = AccountChatState(historyJson, sessionId)
+            states[accountId] = AccountChatState(historyJson, sessionId, activeRunId)
             values[ACCOUNT_CHAT_STATES] = json.encodeToString(states)
             values[LEGACY_CHAT_ACCOUNT] = accountId
             values[CHAT_HISTORY] = historyJson

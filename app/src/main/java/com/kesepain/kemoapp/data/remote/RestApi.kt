@@ -33,6 +33,14 @@ interface RestApi {
     @POST("v1/conversations/{id}/undo-last-round") suspend fun undoLastRound(@Path("id") id: String, @Body body: RequestBody): Response<ResponseBody>
     @POST("v1/guidance") suspend fun submitGuidance(@Body body: RequestBody): Response<ResponseBody>
     @POST("v1/runs/{id}/cancel") suspend fun cancelRun(@Path("id") id: String): Response<ResponseBody>
+    @GET("v1/runs/active") suspend fun activeRuns(
+        @Query("client_id") clientId: String = "",
+        @Query("session_id") sessionId: String = "",
+    ): Response<ResponseBody>
+    @GET("v1/runs/{id}/snapshot") suspend fun runSnapshot(
+        @Path("id") id: String,
+        @Query("after") after: Long = 0,
+    ): Response<ResponseBody>
     @GET("v1/task_plans") suspend fun taskPlans(): Response<ResponseBody>
     @POST("v1/task_plans/{id}/{action}") suspend fun taskAction(@Path("id") id: String, @Path("action") action: String): Response<ResponseBody>
     @GET("v1/cron") suspend fun cron(): Response<ResponseBody>
