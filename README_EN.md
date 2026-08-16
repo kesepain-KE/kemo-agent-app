@@ -71,7 +71,7 @@ kemo-agent-app connects to your deployed kemo-agent through the bridge service. 
 The chat screen is organized around real conversations rather than a single input box:
 
 - Streaming output that reveals the agent's reply word by word;
-- An active reply is protected by a visible background-running notification, allowing its network stream to continue after switching apps or turning off the screen;
+- An active reply uses a visible background-running notification while the process remains online. If Android later reclaims the process or the App is swiped from Recents, the bridge continues owning the framework run; reopening the App restores the account-scoped snapshot without submitting the request twice;
 - Markdown rendering with clear code blocks, lists, and quotes;
 - Reasoning and tool calls (arguments, results, success or failure) are shown so the agent's actions stay understandable;
 - Token usage, cache hits, and response time are displayed;
