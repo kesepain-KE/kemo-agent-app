@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.5-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.6-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -188,7 +188,9 @@ kemo-agent-app 并不试图替代网页端或命令行。
 
 ## 当前状态
 
-当前版本：`1.1.5`（versionCode 7）
+当前版本：`1.1.6`（versionCode 8）
+
+`1.1.6` 引入运行快照恢复：聊天运行由桥接端独立托管，App 进程被系统回收或从最近任务划掉后回复不会中断；重新打开 App 会按账号恢复运行快照，先补回缺失事件再继续接收流式回复，不会重复提交请求。后台保活前台服务随之调整为只保证本地订阅，不再需要把进程钉在内存里直到回复结束。
 
 `1.1.5` 增强长时间闲置后的账号恢复与聊天输入体验：App 启动或从后台回到前台时会主动验证当前账号，会话失效时使用已保存的加密凭据自动重新连接并同步目标账号的聊天历史、上下文窗口和运行状态；WebSocket 鉴权失效也会触发同一恢复流程。聊天发送后自动收起输入法，点击聊天空白区域可以隐藏输入法，执行任务时不再显示输入框上方的运行提示文字。
 

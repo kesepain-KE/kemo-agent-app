@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.5-blue" alt="version"></a>
+  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.6-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -188,7 +188,9 @@ No matter which entry point you use, it connects to the same agent, the same his
 
 ## Current status
 
-Current version: `1.1.5` (versionCode 7)
+Current version: `1.1.6` (versionCode 8)
+
+`1.1.6` introduces managed run recovery: chat runs are now owned by the bridge independently, so a reply survives Android reclaiming the App process or the App being swiped away from Recents. Reopening the App restores the account-scoped run snapshot, replays any missed events, and resumes the streaming reply without submitting the request twice. The background keep-alive foreground service is now scoped to guarding the local subscription only, instead of pinning the process in memory until the reply finishes.
 
 `1.1.5` strengthens account recovery and chat input behavior after long idle periods. When the App starts or returns to the foreground, it validates the selected account; if the session was invalidated, encrypted saved credentials are used to reconnect automatically and resynchronize that account's chat history, context window, and runtime status. WebSocket authentication failures use the same recovery path. Sending a message now dismisses the IME, tapping empty chat space hides it, and the running-task hint above the composer has been removed.
 

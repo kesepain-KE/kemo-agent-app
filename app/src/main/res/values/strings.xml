@@ -104,7 +104,7 @@
     <string name="security">安全</string>
     <string name="auto_lock">后台 5 分钟自动锁定</string>
     <string name="about">关于</string>
-    <string name="version">版本 1.1.5</string>
+    <string name="version">版本 1.1.6</string>
     <string name="version_details">版本详情</string>
     <string name="main_version">主版本</string>
     <string name="core_version">核心版本</string>
