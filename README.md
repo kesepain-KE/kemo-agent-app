@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.6-blue" alt="version"></a>
+<a href="https://github.com/kesepain-KE/kemo-agent-app"><img src="https://img.shields.io/badge/version-1.1.7-blue" alt="version"></a>
   <a href="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml"><img src="https://github.com/kesepain-KE/kemo-agent-app/actions/workflows/android-ci.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
 </p>
@@ -188,7 +188,9 @@ kemo-agent-app 并不试图替代网页端或命令行。
 
 ## 当前状态
 
-当前版本：`1.1.6`（versionCode 8）
+当前版本：`1.1.7`（versionCode 9）
+
+`1.1.7` 聚焦 Android 权限、设备操作与前台渲染稳定性：“我的 → App 配置”新增权限与后台运行中心，集中检查通知、电池优化豁免、ColorOS 自启动指引、安装更新与系统处理器能力；补齐 Android 11+ 闹钟、倒计时、日历和待办 Intent 的包可见性声明，修复 ColorOS 上 `timer.start` 被误报为 `system_handler_unavailable`；修复连续空行触发的流式 Markdown 越界闪退，并移除自定义图片与视频背景的实时模糊合成。
 
 `1.1.6` 引入运行快照恢复：聊天运行由桥接端独立托管，App 进程被系统回收或从最近任务划掉后回复不会中断；重新打开 App 会按账号恢复运行快照，先补回缺失事件再继续接收流式回复，不会重复提交请求。后台保活前台服务随之调整为只保证本地订阅，不再需要把进程钉在内存里直到回复结束。
 

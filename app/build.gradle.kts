@@ -14,8 +14,8 @@ android {
         applicationId = "com.kesepain.kemoapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.1.6"
+        versionCode = 9
+        versionName = "1.1.7"
     }
 
     buildTypes {

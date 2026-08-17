@@ -22,13 +22,10 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -50,10 +47,7 @@ fun AppBackground(
     if (uriValue.isBlank()) return
     val chatScrolling by BackgroundPerformanceController.scrolling.collectAsState()
     Box(modifier.fillMaxSize()) {
-        val mediaModifier = Modifier.fillMaxSize().graphicsLayer {
-            scaleX = 1.01f
-            scaleY = 1.01f
-        }.blur(if (chatScrolling) 0.dp else 1.dp)
+        val mediaModifier = Modifier.fillMaxSize()
         // Some document providers reuse the same content URI when a user picks
         // a replacement. The explicit revision key recreates both bitmap and
         // MediaPlayer state even when uriValue and mimeType did not change.

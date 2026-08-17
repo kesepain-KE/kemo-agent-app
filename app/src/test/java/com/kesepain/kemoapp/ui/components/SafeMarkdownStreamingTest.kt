@@ -13,6 +13,23 @@ class SafeMarkdownStreamingTest {
     }
 
     @Test
+    fun skipsConsecutiveLeadingBlankLinesWithoutInvalidSubstringRange() {
+        val parts = splitStreamingMarkdown("\n\n\n正在输出")
+
+        assertEquals(emptyList<String>(), parts.completedBlocks)
+        assertEquals("正在输出", parts.liveTail)
+    }
+
+    @Test
+    fun handlesEveryStreamingPrefixWithRepeatedBlankLines() {
+        val content = "\n\n前文。\n\n\n```kotlin\nval value = 1\n```\n\n\n尾段正在输出"
+
+        for (endExclusive in 0..content.length) {
+            splitStreamingMarkdown(content.substring(0, endExclusive))
+        }
+    }
+
+    @Test
     fun doesNotSplitBlankLinesInsideFence() {
         val content = "```kotlin\nval a = 1\n\nval b = 2\n```\n下一段"
         val parts = splitStreamingMarkdown(content)

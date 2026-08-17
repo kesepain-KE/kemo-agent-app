@@ -386,13 +386,17 @@ internal fun splitStreamingMarkdown(value: String): StreamingMarkdownParts {
         val safeBoundary = !insideFence && mathDelimiter.isEmpty() && hasLineBreak && (line.isBlank() || closedFence || closedMath)
         if (safeBoundary) {
             val endExclusive = lineEnd + 1
-            value.substring(blockStart, endExclusive).trim().takeIf(String::isNotEmpty)?.let(completed::add)
-            blockStart = endExclusive
+            if (endExclusive > blockStart) {
+                value.substring(blockStart, endExclusive).trim().takeIf(String::isNotEmpty)?.let(completed::add)
+            }
+            blockStart = maxOf(blockStart, endExclusive)
             while (blockStart < value.length && value[blockStart] == '\n') blockStart++
         }
 
         if (!hasLineBreak) break
-        lineStart = lineEnd + 1
+        // A completed boundary can skip several adjacent blank lines. Keep the scanner in
+        // sync with blockStart so a later iteration can never create substring(begin > end).
+        lineStart = maxOf(lineEnd + 1, blockStart)
     }
 
     return StreamingMarkdownParts(
